@@ -1,0 +1,85 @@
+{
+  "name": "@uni-helper/unplugin-uni-sfc",
+  "type": "module",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.11.0",
+  "description": "将使用ts的uni-sfc转换为js的uni-sfc",
+  "license": "MIT",
+  "homepage": "https://github.com/uni-helper/unplugin-uni-sfc#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uni-helper/unplugin-uni-sfc.git"
+  },
+  "bugs": {
+    "url": "https://github.com/uni-helper/unplugin-uni-sfc/issues"
+  },
+  "keywords": [
+    "unplugin",
+    "vite",
+    "tsdown",
+    "rolldown",
+    "transform"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./rolldown": "./dist/rolldown.mjs",
+    "./types": "./dist/types.mjs",
+    "./vite": "./dist/vite.mjs",
+    "./package.json": "./package.json"
+  },
+  "types": "./dist/index.d.mts",
+  "typesVersions": {
+    "*": {
+      "*": [
+        "./dist/*",
+        "./*"
+      ]
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown -w",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "play": "npm -C playground/tsdown run watch",
+    "prepublishOnly": "npm run build",
+    "release": "bumpp && pnpm publish",
+    "test": "vitest"
+  },
+  "peerDependencies": {
+    "rolldown": ">=1",
+    "vite": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "rolldown": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@babel/parser": "^7.29.9",
+    "@vue/compiler-sfc": "^3.5.43",
+    "oxc-transform": "^0.152.0",
+    "unplugin": "^2.3.4"
+  },
+  "devDependencies": {
+    "@antfu/eslint-config": "^4.13.2",
+    "@types/node": "^22.15.21",
+    "@vitejs/devtools-rolldown": "^0.7.6",
+    "@vitejs/devtools-vite": "^0.7.6",
+    "bumpp": "^10.1.1",
+    "eslint": "^9.27.0",
+    "nodemon": "^3.1.10",
+    "rolldown": "^1.2.11",
+    "tsdown": "^0.23.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.4"
+  }
+}

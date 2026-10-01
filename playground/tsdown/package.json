@@ -1,0 +1,18 @@
+{
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "watch": "nodemon -w '../../src/**/*.ts' -e .ts -x pnpm dev --config-loader tsx",
+    "dev": "tsdown -w",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "vue": "^3.3.4"
+  },
+  "devDependencies": {
+    "@vitejs/devtools": "^0.7.6",
+    "tsdown": "^0.23.0",
+    "typescript": "^6.0.3",
+    "vite-plugin-inspect": "^11.1.0"
+  }
+}
