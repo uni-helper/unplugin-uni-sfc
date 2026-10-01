@@ -75,6 +75,8 @@ describe('unplugin-uni-sfc', () => {
     const app = contentOf(await buildFixture('basic'), 'App.vue')
 
     expect(app).toContain('<script setup>')
+    // oxc 会修剪块内容开头的前导空白，回填时需按原文补回，`<script setup>` 后必须换行
+    expect(app).toMatch(/<script setup>\r?\n/)
     expect(app).not.toContain('lang="ts"')
     expect(app).not.toContain(': number')
     // 仅在模板中使用的导入不能被当作未使用代码删掉

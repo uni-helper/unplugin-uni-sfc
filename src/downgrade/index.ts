@@ -189,7 +189,9 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
       text: code.slice(tagStart, block.loc.start.offset).replace(LANG_TS_ATTR_RE, ''),
     })
     const jsCode = transformTs(content, filename, tsx ? 'tsx' : 'ts')
-    edits.push({ start: block.loc.start.offset, end: block.loc.end.offset, text: jsCode })
+    // oxc 会修剪块内容开头的前导空白，按原文补回，避免 `<script setup>` 后直接贴上首行代码
+    const leading = /^\s*/.exec(content)?.[0] ?? ''
+    edits.push({ start: block.loc.start.offset, end: block.loc.end.offset, text: leading + jsCode })
   }
   return applyEdits(code, [...edits, ...templateEdits])
 }
