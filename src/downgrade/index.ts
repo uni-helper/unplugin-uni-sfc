@@ -80,7 +80,6 @@ function collectTemplateExpressions(node: unknown, out: TemplateExpression[]): v
  * 表达式不合法或不含 TS 语法时返回 null，保持原样。
  */
 function stripExpressionTypes(content: string, filename: string): string | null {
-  // 表达式按语句解析失败时（对象字面量开头、v-for 的 `item of items` 等），补一层括号重试
   const parseAsExpression = (source: string): BabelNode | null => {
     try {
       return parseScript(source, false)
@@ -89,7 +88,12 @@ function stripExpressionTypes(content: string, filename: string): string | null 
       return null
     }
   }
-  const ast = parseAsExpression(content) ?? parseAsExpression(`(${content})`)
+  // 顶层不是表达式语句的内容必须补一层括号再转换：对象字面量开头会被解析成块语句
+  // （`{ x: a as any }`），按语句转换会把块语法和分号带进模板；v-for 的 `item of items`
+  // 解析失败，同样走括号重试
+  const direct = parseAsExpression(content)
+  const parenthesized = !direct || direct.program?.body?.[0]?.type !== 'ExpressionStatement'
+  const ast = direct ?? parseAsExpression(`(${content})`)
   if (!ast) {
     // v-for 的值不是合法表达式（`item of items`），按 Vue 的规则拆出别名与迭代源分别降级
     const separator = FOR_SEPARATOR_RE.exec(content)
@@ -117,8 +121,11 @@ function stripExpressionTypes(content: string, filename: string): string | null 
     const { code, errors } = transformSync(filename, source, { lang: 'ts' })
     return errors.some(error => (error.severity as string) === 'Error') ? null : code
   }
-  // oxc 会去掉冗余括号，但会给语句补分号，这里修剪后与原表达式比较
-  const output = (transform(content) ?? transform(`(${content})`))?.replace(/;\s*$/, '')
+  // oxc 会去掉冗余括号，但会给语句补分号；括号形式的产物是语句 `(...)`，
+  // 外层括号是为满足语句语法而存在的，修剪后才是原来的表达式
+  let output = transform(parenthesized ? `(${content})` : content)?.replace(/;\s*$/, '')
+  if (output && parenthesized && output.startsWith('(') && output.endsWith(')'))
+    output = output.slice(1, -1)
   return output && output !== content ? output : null
 }
 

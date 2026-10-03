@@ -97,6 +97,7 @@ describe('unplugin-uni-sfc', () => {
     const app = contentOf(await buildFixture('basic'), 'App.vue')
 
     expect(app).toContain('<p>count10: {{ count + 10 }}</p>')
+    expect(app).toContain('<p>{{ { x: count } }}</p>')
     expect(app).toContain('<p v-if="count > 0">')
     expect(app).toMatch(/v-for="item of list"/)
     expect(app).not.toContain(' as number')

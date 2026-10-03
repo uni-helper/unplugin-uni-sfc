@@ -12,6 +12,7 @@ const list: number[] = [1, 2]
     {{ HEADER }}
     <p>count: {{ count }}</p>
     <p>count10: {{ (count as number) + 10 }}</p>
+    <p>{{ { x: count as number } }}</p>
     <p v-if="count! > 0">
       v-if 中的非空断言
     </p>
