@@ -5,7 +5,8 @@ import { parse } from '@vue/compiler-sfc'
 import { transformSync } from 'oxc-transform'
 import { parseScript, walkNode } from '../babel'
 import { applyMacroRewrites, collectMacroCalls, resolveRuntimeDeclarations } from '../macro'
-import { applyEdits } from '../shared'
+import { applyEdits, findTagStart } from '../shared'
+import { collectStyleEdits } from './less'
 
 const TS_LANG_RE = /^(?:ts|tsx|typescript)$/
 const LANG_TS_ATTR_RE = /\s+lang=(["'])(?:ts|tsx|typescript)\1/i
@@ -52,11 +53,6 @@ function transformTs(content: string, filename: string, lang: 'ts' | 'tsx'): str
   if (fatal.length)
     throw new Error(fatal.map(error => error.codeframe ?? error.message).join('\n'))
   return code
-}
-
-/** `block.loc` 只覆盖块内容（innerLoc），这里向外找到 `<script` 开始标签的位置 */
-function findScriptTagStart(code: string, block: SFCBlock): number {
-  return code.lastIndexOf('<script', block.loc.start.offset)
 }
 
 /** 模板中可降级的表达式（插值与指令值），loc 是整个源文件的绝对偏移 */
@@ -160,7 +156,7 @@ function collectTemplateEdits(template: SFCTemplateBlock, filename: string): Arr
 }
 
 /**
- * 把 SFC 中 script 块的 TS 降级为 JS，返回新的 .vue 源码。
+ * 把 SFC 中 script 块的 TS 降级为 JS、style 块的 less 编译为 CSS，返回新的 .vue 源码。
  * script 块使用了 TS 时，模板表达式（插值、指令值）里的 TS 语法一并降级，
  * 保证产物 SFC 中不残留任何 TS。
  * 只改写这些位置自身，不做任何 vue 编译。没有需要降级的内容时返回 null；
@@ -193,7 +189,9 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
   const templateEdits = blocks.length && descriptor.template?.ast && !descriptor.template.src
     ? collectTemplateEdits(descriptor.template, filename)
     : []
-  if (!blocks.length && !templateEdits.length)
+  // style 块的 less 降级与 script 无关：纯 JS 的 SFC 也可能用到 less
+  const styleEdits = await collectStyleEdits(descriptor.styles, code, filename, warn)
+  if (!blocks.length && !templateEdits.length && !styleEdits.length)
     return null
 
   const edits: Array<{ start: number, end: number, text: string }> = []
@@ -215,7 +213,7 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
       }
     }
 
-    const tagStart = findScriptTagStart(code, block)
+    const tagStart = findTagStart(code, 'script', block)
     edits.push({
       start: tagStart,
       end: block.loc.start.offset,
@@ -226,5 +224,5 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
     const leading = /^\s*/.exec(content)?.[0] ?? ''
     edits.push({ start: block.loc.start.offset, end: block.loc.end.offset, text: leading + jsCode })
   }
-  return applyEdits(code, [...edits, ...templateEdits])
+  return applyEdits(code, [...edits, ...templateEdits, ...styleEdits])
 }

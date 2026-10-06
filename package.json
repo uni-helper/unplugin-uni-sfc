@@ -3,7 +3,7 @@
   "type": "module",
   "version": "0.1.0",
   "packageManager": "pnpm@10.11.0",
-  "description": "将使用 TypeScript 的 uni-app SFC（.vue / .nvue）在构建阶段降级为 JavaScript",
+  "description": "将使用 TypeScript / Less 的 uni-app SFC（.vue / .nvue）在构建阶段降级为 JavaScript / CSS",
   "author": "flippedround",
   "license": "MIT",
   "homepage": "https://github.com/uni-helper/unplugin-uni-sfc#readme",
@@ -23,25 +23,14 @@
     "vite",
     "tsdown",
     "rolldown",
+    "less",
     "transform"
   ],
   "exports": {
-    ".": {
-      "types": "./dist/index.d.mts",
-      "default": "./dist/index.mjs"
-    },
-    "./rolldown": {
-      "types": "./dist/rolldown.d.mts",
-      "default": "./dist/rolldown.mjs"
-    },
-    "./types": {
-      "types": "./dist/types.d.mts",
-      "default": "./dist/types.mjs"
-    },
-    "./vite": {
-      "types": "./dist/vite.d.mts",
-      "default": "./dist/vite.mjs"
-    },
+    ".": "./dist/index.mjs",
+    "./rolldown": "./dist/rolldown.mjs",
+    "./types": "./dist/types.mjs",
+    "./vite": "./dist/vite.mjs",
     "./package.json": "./package.json"
   },
   "types": "./dist/index.d.mts",
@@ -62,10 +51,14 @@
     "test": "vitest"
   },
   "peerDependencies": {
+    "less": "^3.5.0 || ^4.0.0",
     "rolldown": ">=1",
     "vite": ">=3"
   },
   "peerDependenciesMeta": {
+    "less": {
+      "optional": true
+    },
     "rolldown": {
       "optional": true
     },
@@ -81,11 +74,13 @@
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.13.2",
+    "@types/less": "^3.0.8",
     "@types/node": "^22.15.21",
     "@vitejs/devtools-rolldown": "^0.7.6",
     "@vitejs/devtools-vite": "^0.7.6",
     "bumpp": "^10.1.1",
     "eslint": "^9.27.0",
+    "less": "^4.9.1",
     "nodemon": "^3.1.10",
     "rolldown": "^1.2.11",
     "tsdown": "^0.23.0",

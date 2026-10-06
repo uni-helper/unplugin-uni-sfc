@@ -104,6 +104,61 @@ describe('unplugin-uni-sfc', () => {
     expect(app).not.toContain('count!')
   })
 
+  it('降级 SFC：lang="less" 的 style 块编译为 CSS 并移除 lang 标记', async () => {
+    const app = contentOf(await buildFixture('basic'), 'App.vue')
+
+    expect(app).toContain('<style>')
+    expect(app).not.toContain('lang="less"')
+    // less 变量替换、嵌套展开、@import 内联，产物不再依赖 less
+    expect(app).toMatch(/\.header \{\s*color: #ff0000;/)
+    expect(app).toContain('.header .title')
+    expect(app).not.toContain('@header-color')
+    expect(app).not.toContain('@import')
+  })
+
+  it('降级 SFC：没有 TS 的 SFC 也会降级 less 样式', async () => {
+    const plain = contentOf(await buildFixture('basic'), 'Plain.vue')
+
+    expect(plain).toContain('<script>')
+    expect(plain).toContain('<style>')
+    expect(plain).not.toContain('lang="less"')
+    expect(plain).not.toContain('@size')
+    expect(plain).toMatch(/font-size: 12px/)
+  })
+
+  it('sass 由 uni-app 自带支持，lang="scss" 原样保留', async () => {
+    const app = contentOf(await buildFixture('basic'), 'App.vue')
+
+    expect(app).toContain('lang="scss"')
+    expect(app).toContain('$title-color')
+  })
+
+  it('less 编译失败会中断构建，而不是把 less 原文发进产物', async () => {
+    const error = await buildFixture('broken-less').catch((error: Error) => error)
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toContain('编译失败')
+    // less 的报错信息（未定义的变量）原样带出
+    expect(message).toContain('@undefined-var')
+  })
+
+  it('带 src 的外部 less 样式块不降级，只提示不会进入产物', async () => {
+    const warnings: string[] = []
+    const files = await buildFixture('less-src', {
+      onLog(level, log, defaultHandler) {
+        if (level === 'warn')
+          warnings.push(String(log.message))
+        defaultHandler(level, log)
+      },
+    })
+
+    // 外部文件不在降级范围内：原样保留，由告警说明后果
+    const app = contentOf(files, 'App.vue')
+    expect(app).toContain('lang="less"')
+    expect(warnings.join('\n')).toContain('不会被降级')
+  })
+
   it('chunk 里与被换产物同名的普通字符串不会被误改', async () => {
     const files = await buildFixture('shared')
 

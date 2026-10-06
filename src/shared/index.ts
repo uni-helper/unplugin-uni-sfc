@@ -1,3 +1,4 @@
+import type { SFCBlock } from '@vue/compiler-sfc'
 import type { BabelNode } from '../babel'
 import path from 'node:path'
 import { importSourceLiteral, parseScript, walkNode } from '../babel'
@@ -20,6 +21,11 @@ export function applyEdits(code: string, edits: Edit[]): string {
   for (const { start, end, text } of edits.sort((a, b) => b.start - a.start))
     result = result.slice(0, start) + text + result.slice(end)
   return result
+}
+
+/** `block.loc` 只覆盖块内容（innerLoc），这里向外找到 `<tag` 开始标签的位置 */
+export function findTagStart(code: string, tag: string, block: SFCBlock): number {
+  return code.lastIndexOf(`<${tag}`, block.loc.start.offset)
 }
 
 /**
