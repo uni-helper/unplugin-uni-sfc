@@ -242,6 +242,17 @@ describe('unplugin-uni-sfc', () => {
     await expect(buildFixture('broken')).rejects.toThrow(/解析失败/)
   })
 
+  it('使用了条件编译的 SFC 会中断构建，并提示改用 if 分支判断', async () => {
+    const error = await buildFixture('conditional').catch((error: Error) => error)
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toContain('不支持条件编译')
+    // 报错定位到第一处指令：script 里的 `// #ifdef H5`
+    expect(message).toMatch(/第 4 行.*#ifdef H5/s)
+    expect(message).toContain('if 分支判断')
+  })
+
   it('.vue 的产物路径完全由打包工具决定，而不是插件或入口目录', async () => {
     const files = await buildFixture('wide', {
       // 用户把镜像基准抬高到 fixture 目录（src 的上一级），打包工具按它镜像所有模块

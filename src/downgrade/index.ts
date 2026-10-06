@@ -12,12 +12,29 @@ const LANG_TS_ATTR_RE = /\s+lang=(["'])(?:ts|tsx|typescript)\1/i
 // 同 Vue parseFor 的规则：第一个顶层 `in` / `of` 是 v-for 的分隔符
 const FOR_SEPARATOR_RE = /\s+(?:in|of)\s+/
 
+// 条件编译指令：#ifdef / #ifndef / #if / #elif / #else / #endif
+const CONDITIONAL_DIRECTIVE_RE = /#\s*(?:ifdef|ifndef|if|elif|else|endif)\b[^\n]*/
+// 指令必须写在注释里才会生效：JS/TS 的行注释与块注释、CSS 的块注释、模板的 HTML 注释；
+// 只扫注释内的指令，模板纯文本、CSS 选择器等处的 `#ifdef` 字样不是条件编译
+const COMMENT_RE = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g
+
 function isTsBlock(block?: SFCBlock | null): boolean {
   return !!block?.lang && TS_LANG_RE.test(block.lang)
 }
 
 function isTsxBlock(block: SFCBlock): boolean {
   return block.lang === 'tsx'
+}
+
+/** 找出第一处条件编译，返回指令原文（如 `#ifdef H5`）和它所在的行号 */
+function findConditionalCompilation(code: string): { directive: string, line: number } | undefined {
+  for (const comment of code.matchAll(COMMENT_RE)) {
+    const directive = CONDITIONAL_DIRECTIVE_RE.exec(comment[0])?.[0].trim()
+    if (!directive)
+      continue
+    const offset = (comment.index ?? 0) + comment[0].indexOf(directive)
+    return { directive, line: code.slice(0, offset).split('\n').length }
+  }
 }
 
 function transformTs(content: string, filename: string, lang: 'ts' | 'tsx'): string {
@@ -148,6 +165,7 @@ function collectTemplateEdits(template: SFCTemplateBlock, filename: string): Arr
  * 保证产物 SFC 中不残留任何 TS。
  * 只改写这些位置自身，不做任何 vue 编译。没有需要降级的内容时返回 null；
  * SFC 解析失败时抛错中断构建（同 plugin-vue 的行为），避免 TS 原文被静默发进产物。
+ * SFC 里出现 uni-app 条件编译时同样抛错中断：本插件不支持条件编译。
  */
 export async function downgradeSFC(code: string, filename: string, warn?: Warn): Promise<string | null> {
   const { descriptor, errors } = parse(code, { filename })
@@ -159,6 +177,14 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
       })
       .join('\n')
     throw new Error(`${filename} 解析失败，无法降级为 JS：\n${detail}`)
+  }
+
+  // 整个 SFC（script / 模板 / style）都检查，且在 TS 降级之前：任何 .vue 里出现条件编译都直接中断构建
+  const conditional = findConditionalCompilation(code)
+  if (conditional) {
+    throw new Error(
+      `${filename} 第 ${conditional.line} 行使用了 uni-app 条件编译（${conditional.directive}），本插件不支持条件编译，指令会原样保留在产物中。请改用 if 分支判断（如 if (process.env.UNI_PLATFORM === 'h5') { ... }）替代。`,
+    )
   }
 
   const blocks = [descriptor.script, descriptor.scriptSetup]

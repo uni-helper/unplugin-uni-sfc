@@ -48,6 +48,22 @@ export default defineConfig({
 - `.vue` 模块不会换回 `.vue` 文件，引用也不会回填，JS 按打包工具的默认行为输出；
 - 降级后的 `.vue` 源码仍会作为资产输出，但产物中的 JS 不会引用它们。
 
+## 不支持条件编译
+
+本插件不做 uni-app 条件编译（`#ifdef` / `#ifndef` / `#endif`）的预处理：SFC（script、模板、style）中出现条件编译指令时，构建会直接报错中断，而不是把指令原样保留进产物。
+
+请用 `if` 分支判断替代条件编译，推荐 [`@uni-helper/uni-env`](https://github.com/uni-helper/uni-env)：
+
+```ts
+import { isH5 } from '@uni-helper/uni-env'
+
+if (isH5) {
+  // 仅 H5 执行
+}
+```
+
+`uni-env` 提供各平台的判断值（`isH5`、`isMpWeixin`、`isApp` 等），读取的是 uni-app 构建期注入的环境值，经 Vite define 静态替换成字面量；不想引入依赖时，也可以直接写 `if (process.env.UNI_PLATFORM === 'h5') { ... }`。
+
 ## 产物形态
 
 `.vue` 必须一个模块一个产物才能在生成阶段换回 `.vue` 文件。插件会在 ESM 产物下自动打开 `preserveModules`（对应 tsdown `unbundle: true`），无需手动配置。
