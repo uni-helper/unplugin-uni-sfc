@@ -45,6 +45,15 @@ export default defineConfig({
 - less 按可选依赖加载：只有 SFC 里出现 `lang="less"` 时才会用到，未安装时构建会报错并提示安装（`pnpm add -D less`）；
 - 带 `src` 的外部样式块不处理（与 script 块的规则一致）：它们不会被降级，也不会进入产物，请改为内联样式或自行编译为 CSS。
 
+## 脚本里 import 的样式文件
+
+SFC 脚本里的样式引用（`import './styles/global.less'`）由打包工具的 CSS 管线编译（tsdown 需要 [`@tsdown/css`](https://tsdown.dev/plugins/css)，vite 自带），插件负责处理产物 `.vue` 里对应的引用：
+
+- CSS 管线在渲染阶段已产出对应的 CSS 资产时（vite `cssCodeSplit: true`），引用回填成 CSS 资产的路径，下游构建会正常加载它；
+- 资产要到构建收尾才产出时（如 tsdown 的 `@tsdown/css`），整句 `import` 从产物中移除（与打包工具对 JS 导入方的处理一致），并给出告警——编译出的 CSS 仍会作为资产输出，需要时自行引入。
+
+产物中的 `.vue` 不会引用不存在的文件，也不会把 `.less` 引用留给不支持 less 的下游。
+
 ## 只支持 ESM 产物
 
 本插件本质是**语言降级**（TS → JS），不改模块语法：产出的 `.vue` 资产本身就是 ESM 源码（`import` / `export`），产物中的 JS 也需要以 ESM 引用这些 `.vue` 文件，因此**只支持 ESM 产物格式**。

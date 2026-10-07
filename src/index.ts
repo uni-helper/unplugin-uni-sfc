@@ -11,6 +11,9 @@ import { toModuleView } from './view'
 
 const SFC_RE = /\.(?:vue|nvue)$/
 
+/** 样式语言文件的模块：内容会被打包工具的 CSS 管线抽走（如 tsdown 的 @tsdown/css） */
+const CSS_LANG_RE = /\.(?:css|less|sass|scss|styl|stylus|pcss|postcss)$/i
+
 /** `.vue` 的请求可能带 query（`./App.vue?raw`），这里只取文件部分 */
 function toId(source: string): string {
   return source.split('?')[0]
@@ -36,9 +39,12 @@ interface BundlerContext {
 interface OutputChunkLike {
   type: 'chunk'
   fileName: string
+  /** chunk 的逻辑名，可能与 fileName 不同（如 vite lib 模式下的命名） */
+  name?: string
   code: string
   /** 该 chunk 包含的模块，键是模块 id */
   modules: Record<string, unknown>
+  exports?: string[]
   imports: string[]
   dynamicImports?: string[]
 }
@@ -52,9 +58,63 @@ interface OutputAssetLike {
   type: 'asset'
   fileName: string
   source: string | Uint8Array
+  /** 资产对应的原始文件；可能是相对构建根的路径（vite），也可能不提供（tsdown） */
+  originalFileName?: string
 }
 
 type OutputBundleLike = Record<string, OutputChunkLike | OutputAssetLike>
+
+/**
+ * 在产物里找纯样式 chunk 对应的 CSS 资产：有的管线在渲染阶段就产出了每个样式 chunk 的
+ * CSS 资产（vite 的 cssCodeSplit），此时 .vue 里的引用可以指到资产上，否则只能整句移除。
+ * 资产与 chunk 的对应关系没有统一的元数据可查，按可靠性依次尝试：
+ * 资产登记的原始文件名（vite 会带上，相对构建根）、chunk 名派生的资产名（含 `[name]-[hash]` 前缀形态）。
+ */
+function findStyleAsset(
+  moduleIds: string[],
+  chunkFileName: string,
+  chunkName: string | undefined,
+  cssAssetByModule: Map<string, string>,
+  cssAssetByStem: Map<string, string>,
+): string | undefined {
+  // 资产登记的原始文件名可能是相对构建根的路径，模块 id 是绝对路径：按路径后缀对齐
+  for (const id of moduleIds) {
+    const direct = cssAssetByModule.get(id)
+    if (direct)
+      return direct
+    for (const [originalFileName, assetFileName] of cssAssetByModule) {
+      if (id.endsWith(`/${originalFileName}`))
+        return assetFileName
+    }
+  }
+  const stems = new Set([chunkFileName, chunkName]
+    .filter((value): value is string => !!value)
+    .map(value => value.replace(/\.[cm]?js$/i, '')))
+  // 与 chunk 同名的资产
+  for (const stem of stems) {
+    const exact = cssAssetByStem.get(stem)
+    if (exact)
+      return exact
+  }
+  // 模块路径命名的资产（`styles/global.css` 对应 `src/styles/global.less`）：路径后缀对齐且唯一
+  for (const id of moduleIds) {
+    const moduleStem = id.replace(/\.[^.]+$/, '')
+    const candidates = new Set<string>()
+    for (const [stem, assetFileName] of cssAssetByStem) {
+      if (stem === moduleStem || moduleStem.endsWith(`/${stem}`))
+        candidates.add(assetFileName)
+    }
+    if (candidates.size === 1)
+      return [...candidates][0]
+  }
+  // 哈希命名（`[name]-[hash].css`）：前缀一致且唯一才可用
+  const prefixCandidates = new Set<string>()
+  for (const [stem, assetFileName] of cssAssetByStem) {
+    if ([...stems].some(chunkStem => stem.startsWith(`${chunkStem}-`)))
+      prefixCandidates.add(assetFileName)
+  }
+  return prefixCandidates.size === 1 ? [...prefixCandidates][0] : undefined
+}
 
 interface SfcOutput {
   id: string
@@ -192,10 +252,30 @@ export const unpluginFactory: UnpluginFactory<Options | undefined, false> = () =
       // 1. 找出 .vue 的 chunk，并记下每个模块最终落在哪个产物里
       const outputByModuleId = new Map<string, string>()
       const sfcChunks = new Map<string, SfcOutput>()
+      // 纯样式 chunk：模块全是样式语言且没有任何导出。样式内容会被打包工具的 CSS 管线
+      // 抽成资产、chunk 本身不再进入产物（如 tsdown 的 @tsdown/css 会删掉这类空壳 chunk），
+      // 其中的模块不能作为引用目标
+      const styleOnlyTargets = new Map<string, string | undefined>()
+      // CSS 资产的索引：原始文件名 -> 资产路径；资产路径 stem -> 资产路径
+      const cssAssetByModule = new Map<string, string>()
+      const cssAssetByStem = new Map<string, string>()
+      for (const item of Object.values(bundle)) {
+        if (item.type !== 'asset' || !item.fileName.endsWith('.css'))
+          continue
+        if (item.originalFileName)
+          cssAssetByModule.set(toId(item.originalFileName), item.fileName)
+        cssAssetByStem.set(item.fileName.slice(0, -'.css'.length), item.fileName)
+      }
       for (const [fileName, item] of Object.entries(bundle)) {
         if (item.type !== 'chunk')
           continue
         const moduleIds = Object.keys(item.modules)
+        if (moduleIds.length && moduleIds.every(id => CSS_LANG_RE.test(id)) && !item.exports?.length) {
+          const cssAsset = findStyleAsset(moduleIds, fileName, item.name, cssAssetByModule, cssAssetByStem)
+          for (const id of moduleIds)
+            styleOnlyTargets.set(id, cssAsset)
+          continue
+        }
         const sfcModules = moduleIds.filter(id => outputs.has(id))
         // 一个 chunk 只装一个 .vue 模块时，才能换成 .vue 文件
         if (sfcModules.length === 1 && moduleIds.length === 1) {
@@ -249,9 +329,23 @@ export const unpluginFactory: UnpluginFactory<Options | undefined, false> = () =
         if (resolutions?.size) {
           for (const reference of output.references) {
             const resolvedId = resolutions.get(reference.specifier)
-            const fileName = resolvedId ? outputByModuleId.get(resolvedId) : undefined
-            if (!fileName)
+            // 引用的模块进了纯样式 chunk：CSS 管线已产出对应的 CSS 资产时把引用指过去，
+            // 没有就整句移除 import（同打包工具对 JS 导入方的处理），避免产物指向已删除的 chunk
+            const cssAsset = resolvedId ? styleOnlyTargets.get(resolvedId) : undefined
+            if (cssAsset) {
+              const specifier = toSpecifier(output.fileName, cssAsset)
+              if (specifier !== reference.specifier)
+                edits.push({ start: reference.start, end: reference.end, text: JSON.stringify(specifier) })
               continue
+            }
+            const fileName = resolvedId ? outputByModuleId.get(resolvedId) : undefined
+            if (!fileName) {
+              if (resolvedId && styleOnlyTargets.has(resolvedId) && reference.statement) {
+                edits.push({ start: reference.statement.start, end: reference.statement.end, text: '' })
+                warn(`${output.id} 对 ${reference.specifier} 的 import 已从产物中移除：其内容由打包工具的 CSS 管线编译成 CSS 资产输出，如有需要请自行引入该资产`)
+              }
+              continue
+            }
             const specifier = toSpecifier(output.fileName, fileName)
             if (specifier !== reference.specifier)
               edits.push({ start: reference.start, end: reference.end, text: JSON.stringify(specifier) })

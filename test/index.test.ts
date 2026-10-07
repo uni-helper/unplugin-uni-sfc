@@ -159,6 +159,66 @@ describe('unplugin-uni-sfc', () => {
     expect(warnings.join('\n')).toContain('不会被降级')
   })
 
+  it('sFC 里 import 的样式文件：整句 import 从产物移除，内容由 CSS 管线抽成资产', async () => {
+    const warnings: string[] = []
+    // 模拟 @tsdown/css 之类的 CSS 管线：样式模块的内容被抽走，只剩一个空壳模块
+    const files = await buildFixture('style-import', {
+      plugins: [{
+        name: 'test:fake-css-pipeline',
+        load(id) {
+          if (!id.endsWith('.less'))
+            return
+          return { code: '', moduleType: 'js', moduleSideEffects: 'no-treeshake' }
+        },
+      }],
+      onLog(level, log, defaultHandler) {
+        if (level === 'warn')
+          warnings.push(String(log.message))
+        defaultHandler(level, log)
+      },
+    })
+
+    // 纯样式 chunk 会被 CSS 管线丢弃，.vue 不能引用它：整句 import 移除（同打包工具对 JS 的处理）
+    const app = contentOf(files, 'App.vue')
+    expect(app).not.toContain('global.less')
+    expect(app).not.toMatch(/import ["']\.\/styles/)
+    expect(warnings.join('\n')).toContain('import 已从产物中移除')
+  })
+
+  it('sFC 里 import 的样式文件：CSS 资产已产出时，引用回填成 CSS 资产的路径', async () => {
+    const warnings: string[] = []
+    // 模拟 vite 的 cssCodeSplit：渲染阶段就把纯样式 chunk 的 CSS 资产产出
+    const files = await buildFixture('style-import', {
+      plugins: [{
+        name: 'test:fake-css-pipeline',
+        load(id) {
+          if (!id.endsWith('.less'))
+            return
+          return { code: '', moduleType: 'js', moduleSideEffects: 'no-treeshake' }
+        },
+        renderChunk(_code, chunk) {
+          if (!Object.keys(chunk.modules).some(id => id.endsWith('.less')))
+            return
+          this.emitFile({
+            type: 'asset',
+            fileName: chunk.fileName.replace(/\.[cm]?js$/, '.css'),
+            source: '.count {\n  color: #42b883;\n}\n',
+          })
+          return undefined
+        },
+      }],
+      onLog(level, log, defaultHandler) {
+        if (level === 'warn')
+          warnings.push(String(log.message))
+        defaultHandler(level, log)
+      },
+    })
+
+    expect(contentOf(files, 'App.vue')).toMatch(/import ["']\.\/styles\/global\.css["']/)
+    expect(contentOf(files, 'App.vue')).not.toContain('global.less')
+    expect(warnings.join('\n')).not.toContain('import 已从产物中移除')
+  })
+
   it('chunk 里与被换产物同名的普通字符串不会被误改', async () => {
     const files = await buildFixture('shared')
 

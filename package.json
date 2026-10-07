@@ -74,6 +74,7 @@
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.13.2",
+    "@tsdown/css": "^0.23.0",
     "@types/less": "^3.0.8",
     "@types/node": "^22.15.21",
     "@vitejs/devtools-rolldown": "^0.7.6",

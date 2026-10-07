@@ -10,6 +10,7 @@ export interface BabelNode {
   declaration?: BabelNode
   arguments?: BabelNode[]
   properties?: BabelNode[]
+  specifiers?: BabelNode[]
   /** import / export-from / 动态 import / require 引用的模块 */
   source?: BabelNode | null
   key?: BabelNode
