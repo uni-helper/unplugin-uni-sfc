@@ -36,6 +36,17 @@ export default defineConfig({
 })
 ```
 
+## 类型宏：defineProps / defineEmits
+
+`defineProps<T>()` / `defineEmits<T>()` 以及 `withDefaults` 的运行时声明只存在于类型里，类型擦除后会丢失，插件会用 Vue 官方编译器（`extractRuntimeProps` / `extractRuntimeEmits`）把它们生成出来，回填到原宏调用处：
+
+- 跨文件导入的类型（`import type { Props } from './props'`）会被解析——包括 `Pick`、`Omit`、`extends` 等；
+- 类型解析需要 `typescript`，插件会从构建目录向上查找；同时支持 tsconfig 的 `paths` 别名（`@/types`），前提是工程里有 `tsconfig.json`；
+- `withDefaults` 的默认值会合进 props 声明；若默认值无法静态内联（如展开、函数返回），声明里会用到 Vue 的 `mergeDefaults`，插件会自动补上它的导入；
+- 解构写法 `const { count = 1 } = defineProps<T>()` 的默认值同样会保留。
+
+类型解析失败时构建会**中断并报错**，而不是悄悄产出没有 props 声明的组件（那会让 props 退化成普通 attributes，到运行期才暴露）。此时请修正类型引用，或改用运行时声明 `defineProps({ ... })` / `defineEmits([...])`。
+
 ## 样式：less 降级为 CSS
 
 `<style lang="less">` 会在构建时用 [less](https://lesscss.org) 编译为 CSS：变量替换、嵌套展开、`@import` 内联（相对 `.vue` 解析），并移除 `lang="less"` 标记，产物中的 `.vue` 不再依赖 less。

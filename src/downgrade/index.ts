@@ -4,7 +4,7 @@ import type { Warn } from '../types'
 import { parse } from '@vue/compiler-sfc'
 import { transformSync } from 'oxc-transform'
 import { parseScript, walkNode } from '../babel'
-import { applyMacroRewrites, collectMacroCalls, resolveRuntimeDeclarations } from '../macro'
+import { rewriteTypeMacros } from '../macro'
 import { applyEdits, findTagStart } from '../shared'
 import { collectStyleEdits } from './less'
 
@@ -38,6 +38,57 @@ function findConditionalCompilation(code: string): { directive: string, line: nu
   }
 }
 
+/**
+ * 空的 `export {}` 语句（没有导出声明、没有 specifier、没有来源）。
+ *
+ * oxc 在删掉脚本里全部类型导入后会补一个，用来维持「这是模块」的语义，
+ * 但 `<script setup>` 不允许出现 ES 模块导出（Vue 会直接报错），必须去掉。
+ */
+function hasEmptyExport(ast: BabelNode): boolean {
+  const body = ast.program?.body ?? ast.body ?? []
+  return body.some(node =>
+    node.type === 'ExportNamedDeclaration'
+    && !node.declaration
+    && !node.source
+    && !node.specifiers?.length)
+}
+
+/**
+ * 去掉 oxc 自行补上的 `export {}`：只在原内容里没有空导出时才处理，
+ * 用户自己写的 `export {}` 原样保留。
+ */
+function stripInjectedEmptyExport(code: string, source: string, tsx: boolean): string {
+  if (!/(?:^|\n)\s*export\s*\{\s*\}\s*;?/.test(code))
+    return code
+  let sourceAst: BabelNode
+  try {
+    sourceAst = parseScript(source, tsx)
+  }
+  catch {
+    return code
+  }
+  if (hasEmptyExport(sourceAst))
+    return code
+
+  let outputAst: BabelNode
+  try {
+    outputAst = parseScript(code, tsx)
+  }
+  catch {
+    return code
+  }
+  const injected = (outputAst.program?.body ?? []).find(node =>
+    node.type === 'ExportNamedDeclaration'
+    && !node.declaration
+    && !node.source
+    && !node.specifiers?.length)
+  if (!injected)
+    return code
+  // 连同它前面的空白一起删掉，避免留下空行
+  const start = code.slice(0, injected.start).replace(/[ \t]*$/, '').replace(/\n$/, '').length
+  return code.slice(0, start) + code.slice(injected.end)
+}
+
 function transformTs(content: string, filename: string, lang: 'ts' | 'tsx'): string {
   const { code, errors } = transformSync(filename, content, {
     lang,
@@ -52,7 +103,7 @@ function transformTs(content: string, filename: string, lang: 'ts' | 'tsx'): str
   const fatal = errors.filter(error => (error.severity as string) === 'Error')
   if (fatal.length)
     throw new Error(fatal.map(error => error.codeframe ?? error.message).join('\n'))
-  return code
+  return stripInjectedEmptyExport(code, content, lang === 'tsx')
 }
 
 /** 模板中可降级的表达式（插值与指令值），loc 是整个源文件的绝对偏移 */
@@ -199,19 +250,10 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
     const tsx = isTsxBlock(block)
     let content = block.content
 
-    if (block === descriptor.scriptSetup) {
-      try {
-        const calls = collectMacroCalls(parseScript(content, tsx))
-        if (calls.length) {
-          const runtime = resolveRuntimeDeclarations(descriptor, filename, tsx, warn)
-          if (runtime)
-            content = applyMacroRewrites(content, calls, runtime)
-        }
-      }
-      catch {
-        // 脚本语法本身有问题时不回填，交给后续 oxc 报错
-      }
-    }
+    // 类型宏的运行时声明只存在于类型里，必须在擦除类型之前回填；
+    // 普通 <script> 的类型声明也参与解析（两个块共享作用域）
+    if (block === descriptor.scriptSetup)
+      content = rewriteTypeMacros(block, descriptor.script, tsx, filename)
 
     const tagStart = findTagStart(code, 'script', block)
     edits.push({

@@ -357,6 +357,88 @@ describe('unplugin-uni-sfc', () => {
     await expect(buildFixture('broken')).rejects.toThrow(/解析失败/)
   })
 
+  it('类型宏：跨文件导入的类型被解析成运行时声明', async () => {
+    const app = contentOf(await buildFixture('macros'), 'ImportedTypes.vue')
+
+    // 类型擦除后 defineProps<T>() 的声明会丢失，必须回填成运行时对象
+    expect(app).toMatch(/defineProps\(\{/)
+    expect(app).toMatch(/title:\s*\{\s*type:\s*String,\s*required:\s*true\s*\}/)
+    expect(app).toMatch(/count:\s*\{\s*type:\s*Number,\s*required:\s*false\s*\}/)
+    expect(app).toMatch(/tags:\s*\{\s*type:\s*Array,\s*required:\s*false\s*\}/)
+    // 联合类型退化成 String
+    expect(app).toMatch(/mode:\s*\{\s*type:\s*String,\s*required:\s*true\s*\}/)
+    // defineEmits<T>() 回填成事件名数组
+    expect(app).toMatch(/defineEmits\(\["change",\s*"close"\]\)/)
+    // 类型导入本身要被擦干净
+    expect(app).not.toContain('import type')
+    expect(app).not.toContain('./panel')
+  })
+
+  it('类型宏：withDefaults 的默认值合进 props，helper 从 vue 导入', async () => {
+    const app = contentOf(await buildFixture('macros'), 'MergeDefaults.vue')
+
+    // 非静态默认值走 mergeDefaults：Vue 只给占位名，插件必须自己补 import
+    expect(app).toMatch(/import \{ mergeDefaults as (\w+) \} from ["']vue["']/)
+    // 生成的声明里必须引用那个导入进来的 helper（而不是 Vue 自己的占位名）
+    const helper = /import \{ mergeDefaults as (\w+) \}/.exec(app)?.[1]
+    expect(helper).toBeTruthy()
+    expect(app).toContain(`defineProps(/*@__PURE__*/ ${helper}(`)
+    // withDefaults 外层必须消失：Vue 不允许它搭配运行时声明
+    expect(app).not.toContain('withDefaults')
+    // 默认值原文保留
+    expect(app).toContain('...{ label: "default" }')
+    expect(app).toMatch(/list:\s*\(\)\s*=>\s*\[\]/)
+  })
+
+  it('类型宏：解构写法的默认值不丢失', async () => {
+    const app = contentOf(await buildFixture('macros'), 'Destructured.vue')
+
+    // `count = 1` 只存在于解构表达式里，类型声明上看不到，不回填就会丢
+    expect(app).toMatch(/count:\s*\{[^}]*default:\s*1/)
+    expect(app).toMatch(/other:\s*\{\s*type:\s*String,\s*required:\s*false\s*\}/)
+  })
+
+  it('只有类型导入的 <script setup> 不会残留 export {}', async () => {
+    const app = contentOf(await buildFixture('macros'), 'TypeImportOnly.vue')
+
+    // oxc 擦除类型导入后会补 `export {}`，而 <script setup> 不允许 ES 模块导出
+    expect(app).not.toMatch(/export\s*\{\s*\}/)
+    expect(app).toContain('<script setup>')
+    // 类型导入被擦掉，但宏回填的声明还在
+    expect(app).not.toContain('import type')
+    expect(app).toMatch(/defineProps\(\{\s*tag:/)
+  })
+
+  it('运行时声明的 defineProps / defineEmits 原样保留', async () => {
+    const app = contentOf(await buildFixture('macros'), 'RuntimeDecl.vue')
+
+    expect(app).toMatch(/defineProps\(\{\s*label:\s*\{\s*type:\s*String/)
+    expect(app).toMatch(/defineEmits\(\["tap"\]\)/)
+    // 运行时声明本来就不需要回填，不应被改写
+    expect(app).not.toMatch(/mergeDefaults/)
+  })
+
+  it('类型宏：普通 <script> 里声明的类型也能被 <script setup> 引用', async () => {
+    const app = contentOf(await buildFixture('macros'), 'SharedScript.vue')
+
+    // 两个块共享作用域：类型声明在普通 <script> 里，宏在 <script setup> 里
+    expect(app).toMatch(/defineProps\(\{\s*alpha:/)
+    expect(app).toMatch(/alpha:\s*\{\s*type:\s*String,\s*required:\s*true\s*\}/)
+    expect(app).toMatch(/beta:\s*\{\s*type:\s*Number,\s*required:\s*false\s*\}/)
+  })
+
+  it('类型解析不了时中断构建，并提示改用运行时声明', async () => {
+    const error = await buildFixture('unresolved-type').catch((error: Error) => error)
+
+    expect(error).toBeInstanceOf(Error)
+    const message = (error as Error).message
+    expect(message).toContain('类型宏解析失败')
+    expect(message).toContain('not-exists')
+    expect(message).toContain('运行时声明')
+    // 不能退化成无参 defineProps()：那会静默丢掉 props 声明
+    expect(message).not.toContain('defineProps()')
+  })
+
   it('使用了条件编译的 SFC 会中断构建，并提示改用 if 分支判断', async () => {
     const error = await buildFixture('conditional').catch((error: Error) => error)
 

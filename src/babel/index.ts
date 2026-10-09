@@ -18,6 +18,15 @@ export interface BabelNode {
   callee?: BabelNode
   typeParameters?: BabelNode | null
   typeArguments?: BabelNode | null
+  /** 类型实参 / 函数参数等按位置排列的子节点 */
+  params?: BabelNode[]
+  /** 变量声明的绑定目标（`const <id> = <init>`） */
+  id?: BabelNode
+  /** 变量声明的初始值 */
+  init?: BabelNode
+  /** 赋值模式的两侧（`a = 1`） */
+  left?: BabelNode
+  right?: BabelNode
 }
 
 export function isBabelNode(value: unknown): value is BabelNode {
