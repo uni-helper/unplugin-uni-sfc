@@ -6,7 +6,7 @@
 
 ## 安装
 
-环境要求：Node.js ≥ 18.12。
+环境要求：Node.js ≥ 20.19（或 ≥ 22.12）。
 
 ```bash
 pnpm add -D @uni-helper/unplugin-uni-sfc

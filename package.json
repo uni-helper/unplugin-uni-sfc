@@ -38,7 +38,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=18.12.0"
+    "node": "^20.19.0 || >=22.12.0"
   },
   "scripts": {
     "build": "tsdown",
@@ -48,11 +48,16 @@
     "play": "npm -C playground/tsdown run watch",
     "prepublishOnly": "npm run build",
     "release": "bumpp && pnpm publish",
-    "test": "vitest"
+    "test": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "peerDependencies": {
     "less": "^3.5.0 || ^4.0.0",
     "rolldown": ">=1",
+    "typescript": ">=4.5",
     "vite": ">=3"
   },
   "peerDependenciesMeta": {
@@ -60,6 +65,9 @@
       "optional": true
     },
     "rolldown": {
+      "optional": true
+    },
+    "typescript": {
       "optional": true
     },
     "vite": {
@@ -74,6 +82,7 @@
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.13.2",
+    "@babel/types": "^7.29.8",
     "@tsdown/css": "^0.23.0",
     "@types/less": "^3.0.8",
     "@types/node": "^22.15.21",

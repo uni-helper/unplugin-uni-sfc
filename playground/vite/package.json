@@ -2,11 +2,15 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "nodemon -w '../src/**/*.ts' -e .ts -x vite",
+    "dev": "nodemon -w '../../src/**/*.ts' -e .ts -x vite",
     "build": "vite build"
+  },
+  "dependencies": {
+    "vue": "^3.3.4"
   },
   "devDependencies": {
     "less": "^4.9.1",
+    "nodemon": "^3.1.10",
     "vite": "^8.3.1",
     "vite-plugin-inspect": "^11.1.0"
   }

@@ -4,13 +4,14 @@
   "scripts": {
     "watch": "nodemon -w '../../src/**/*.ts' -e .ts -x pnpm dev --config-loader tsx",
     "dev": "tsdown -w",
-    "build": "tsdown"
+    "build": "tsdown --config-loader tsx --no-devtools"
   },
   "dependencies": {
     "vue": "^3.3.4"
   },
   "devDependencies": {
     "@vitejs/devtools": "^0.7.6",
+    "nodemon": "^3.1.10",
     "tsdown": "^0.23.0",
     "typescript": "^6.0.3",
     "vite-plugin-inspect": "^11.1.0"

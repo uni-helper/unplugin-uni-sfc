@@ -24,6 +24,9 @@ importers:
       '@antfu/eslint-config':
         specifier: ^4.13.2
         version: 4.13.2(@vue/compiler-sfc@3.5.43)(eslint@9.27.0(jiti@2.4.2))(typescript@5.8.3)(vitest@3.1.4(@types/debug@4.1.12)(@types/node@22.15.21)(jiti@2.4.2)(less@4.9.1)(lightningcss@1.33.0)(terser@5.39.2)(tsx@4.19.4)(yaml@2.8.0))
+      '@babel/types':
+        specifier: ^7.29.8
+        version: 7.29.8
       '@tsdown/css':
         specifier: ^0.23.0
         version: 0.23.0(jiti@2.4.2)(postcss@8.5.28)(tsdown@0.23.0)(tsx@4.19.4)(yaml@2.8.0)
@@ -79,6 +82,9 @@ importers:
       '@vitejs/devtools':
         specifier: ^0.7.6
         version: 0.7.6(@devframes/json-render@1.1.0(@devframes/hub@1.1.0(@devframes/agentic@1.1.0)(crossws@0.4.12(srvx@1.0.5))(devframe@1.1.0))(devframe@1.1.0))(@vitejs/devtools-rolldown@0.7.6)(@vitejs/devtools-vite@0.7.6)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)(vite@8.3.1)
+      nodemon:
+        specifier: ^3.1.10
+        version: 3.1.10
       tsdown:
         specifier: ^0.23.0
         version: 0.23.0(@tsdown/css@0.23.0)(@vitejs/devtools@0.7.6)(tsx@4.19.4)(typescript@6.0.3)
@@ -90,10 +96,17 @@ importers:
         version: 11.4.1(vite@8.3.1)
 
   playground/vite:
+    dependencies:
+      vue:
+        specifier: ^3.3.4
+        version: 3.5.43(typescript@6.0.3)
     devDependencies:
       less:
         specifier: ^4.9.1
         version: 4.9.1
+      nodemon:
+        specifier: ^3.1.10
+        version: 3.1.10
       vite:
         specifier: ^8.3.1
         version: 8.3.1(@types/node@22.15.21)(@vitejs/devtools@0.7.6)(esbuild@0.28.2)(jiti@2.4.2)(less@4.9.1)(terser@5.39.2)(tsx@4.19.4)(yaml@2.8.0)
@@ -157,10 +170,6 @@ packages:
 
   '@babel/helper-string-parser@7.29.7':
     resolution: {integrity: sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw==}
-    engines: {node: '>=6.9.0'}
-
-  '@babel/helper-validator-identifier@7.27.1':
-    resolution: {integrity: sha512-D2hP9eA+Sqx1kBZgzxZh0y1trbuU+JoDkiEwqhQ36nodYqJwyEIhPSdMNd7lOm/4io72luTPWH20Yda0xOuUow==}
     engines: {node: '>=6.9.0'}
 
   '@babel/helper-validator-identifier@7.29.7':
@@ -3453,8 +3462,6 @@ snapshots:
 
   '@babel/helper-string-parser@7.29.7': {}
 
-  '@babel/helper-validator-identifier@7.27.1': {}
-
   '@babel/helper-validator-identifier@7.29.7': {}
 
   '@babel/parser@7.29.9':
@@ -4138,7 +4145,7 @@ snapshots:
       lightningcss: 1.33.0
       postcss-load-config: 6.0.1(jiti@2.4.2)(postcss@8.5.28)(tsx@4.19.4)(yaml@2.8.0)
       rolldown: 1.2.11
-      tsdown: 0.23.0(@tsdown/css@0.23.0)(@vitejs/devtools@0.7.6(@devframes/json-render@1.1.0(@devframes/hub@1.1.0(@devframes/agentic@1.1.0(crossws@0.4.12(srvx@1.0.5))(devframe@1.1.0))(crossws@0.4.12(srvx@1.0.5))(devframe@1.1.0))(devframe@1.1.0))(@vitejs/devtools-rolldown@0.7.6(@devframes/agentic@1.1.0(crossws@0.4.12(srvx@1.0.5))(devframe@1.1.0))(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)(vite@6.3.5(@types/node@22.15.21)(jiti@2.4.2)(less@4.9.1)(lightningcss@1.33.0)(terser@5.39.2)(tsx@4.19.4)(yaml@2.8.0)))(@vitejs/devtools-vite@0.7.6(@devframes/agentic@1.1.0(crossws@0.4.12(srvx@1.0.5))(devframe@1.1.0))(cac@7.0.0)(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)(vite@6.3.5(@types/node@22.15.21)(jiti@2.4.2)(less@4.9.1)(lightningcss@1.33.0)(terser@5.39.2)(tsx@4.19.4)(yaml@2.8.0)))(crossws@0.4.12(srvx@1.0.5))(srvx@1.0.5)(vite@6.3.5(@types/node@22.15.21)(jiti@2.4.2)(less@4.9.1)(lightningcss@1.33.0)(terser@5.39.2)(tsx@4.19.4)(yaml@2.8.0)))(tsx@4.19.4)(typescript@5.8.3)
+      tsdown: 0.23.0(@tsdown/css@0.23.0)(@vitejs/devtools@0.7.6)(tsx@4.19.4)(typescript@6.0.3)
     optionalDependencies:
       postcss: 8.5.28
     transitivePeerDependencies:
@@ -5145,7 +5152,7 @@ snapshots:
 
   eslint-plugin-unicorn@59.0.1(eslint@9.27.0(jiti@2.4.2)):
     dependencies:
-      '@babel/helper-validator-identifier': 7.27.1
+      '@babel/helper-validator-identifier': 7.29.7
       '@eslint-community/eslint-utils': 4.7.0(eslint@9.27.0(jiti@2.4.2))
       '@eslint/plugin-kit': 0.2.8
       ci-info: 4.2.0
