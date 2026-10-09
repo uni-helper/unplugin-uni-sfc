@@ -50,6 +50,17 @@ export default defineConfig({
 })
 ```
 
+## 给 AI 编码助手：Agent Skill
+
+仓库里带了一份 [Agent Skill](https://agentskills.io)，位于 [`skills/unplugin-uni-sfc/SKILL.md`](./skills/unplugin-uni-sfc/SKILL.md)。它把本插件的安装、配置、硬性约束和报错速查整理成一份**按需加载**的说明书：AI 编码助手在帮你配构建、排插件报错时自己读它，不必把整篇 README 塞进上下文。
+
+用 [`skills` CLI](https://skills.sh) 安装：
+
+```sh
+# 安装到当前项目（默认装到 ./<agent>/skills/，可随项目提交、与团队共享）
+npx skills add uni-helper/unplugin-uni-sfc
+```
+
 ## 类型宏：defineProps / defineEmits
 
 `defineProps<T>()` / `defineEmits<T>()` 以及 `withDefaults` 的运行时声明只存在于类型里，类型擦除后会丢失，插件会用 Vue 官方编译器（`extractRuntimeProps` / `extractRuntimeEmits`）把它们生成出来，回填到原宏调用处：
