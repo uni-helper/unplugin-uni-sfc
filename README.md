@@ -1,14 +1,28 @@
-# unplugin-uni-sfc
+<img src="./banner.svg" alt="banner" width="100%"/>
 
-将使用 TypeScript / Less 的 uni SFC（`.vue` / `.nvue`）降级为 JavaScript / CSS 的 SFC。
+<a href="https://github.com/uni-helper/unplugin-uni-sfc/stargazers"><img src="https://img.shields.io/github/stars/uni-helper/unplugin-uni-sfc?colorA=005947&colorB=eee&style=for-the-badge" alt="GitHub Stars"></a>
+<a href="https://www.npmjs.com/package/@uni-helper/unplugin-uni-sfc"><img src="https://img.shields.io/npm/dm/@uni-helper/unplugin-uni-sfc?colorA=005947&colorB=eee&style=for-the-badge" alt="npm downloads"></a>
+<a href="https://www.npmjs.com/package/@uni-helper/unplugin-uni-sfc"><img src="https://img.shields.io/npm/v/@uni-helper/unplugin-uni-sfc?colorA=005947&colorB=eee&style=for-the-badge" alt="npm version"></a>
+<br/>
 
-插件在打包阶段把 `lang="ts"` 的 script 块与模板表达式中的 TS 语法降级为 JS，把 `lang="less"` 的 style 块编译为 CSS，产物中的 `.vue` 以降级后的源码直接输出；依赖解析、编译和产物组织仍然交给打包工具（vite / rolldown / tsdown），插件不重复造轮子。
+把使用 TypeScript / Less 的 [uni-app](https://uniapp.dcloud.net.cn/) SFC（`.vue` / `.nvue`）在构建阶段降级为 JavaScript / CSS。
+
+打包阶段把 `lang="ts"` 的 script 块与模板表达式中的 TS 语法擦除成 JS，把 `lang="less"` 的 style 块编译成 CSS，产物中的 `.vue` 以降级后的源码直接输出。依赖解析、编译和产物组织仍然交给打包工具（vite / rolldown / tsdown），插件不重复造轮子。
+
+## 特性
+
+- 🧹 **语言降级**：`lang="ts"` / `lang="tsx"` 的 script 与模板表达式降级为 JS，产物 `.vue` 不再依赖 TS
+- 🏷 **类型宏回填**：`defineProps<T>()` / `defineEmits<T>()` / `withDefaults` 用 Vue 官方编译器生成运行时声明，跨文件类型与 tsconfig `paths` 都能解析
+- 🎨 **样式降级**：`<style lang="less">` 编译为 CSS，变量、嵌套、`@import` 全部内联
+- 🔗 **交给打包工具**：`.vue` 被当成普通 JS 模块参与依赖图，引用与产物路径由打包工具决定
+- 🧩 **零配置**：ESM 产物下自动打开 `preserveModules`，没有可配置项
+- 🛑 **失败即中断**：类型解析失败、less 编译失败、出现条件编译指令时直接报错，不静默产出坏组件
 
 ## 安装
 
 环境要求：Node.js ≥ 20.19（或 ≥ 22.12）。
 
-```bash
+```sh
 pnpm add -D @uni-helper/unplugin-uni-sfc
 ```
 
@@ -99,6 +113,20 @@ if (isH5) {
 
 `.vue` 在产物中的位置与它的 JS 模块同位（只把扩展名换回 `.vue` / `.nvue`），镜像基准完全由打包工具决定：rolldown / rollup 按 `preserveModules` 的规则推导，tsdown `unbundle` 下对应 `root` 配置。插件不拥有任何产物形态的配置，也没有可配置项——它本质上是做降级处理，产物组织全部交给打包工具。
 
+## 实现原理
+
+1. `load` 阶段读取 `.vue`，用 `@vue/compiler-sfc` 解析后擦除 TS 类型（`oxc-transform`）、回填类型宏的运行时声明、把 less 编译成 CSS，得到降级后的 SFC 源码。
+2. 同一份降级源码编译出一个 JS 模块视图交给打包工具，脚本和模板里用到的导入因此真实出现在依赖图里——模板中使用的绑定不会被 tree-shaking 丢掉。
+3. 生成阶段把 `.vue` 对应的 chunk 换成 `.vue` 资产，位置与它的 JS 模块同位，并把产物 JS 里的引用回填成指向 `.vue`。
+
 ## License
 
 [MIT](./LICENSE)
+
+## 🙇🏻‍♂️[赞助](https://afdian.com/a/flippedround)
+
+<p align="center">
+  <a href="https://afdian.com/a/flippedround">
+    <img alt="sponsors" src="https://cdn.jsdelivr.net/gh/FliPPeDround/sponsors/sponsorkit/sponsors.svg"/>
+  </a>
+</p>
