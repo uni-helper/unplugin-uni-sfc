@@ -6,9 +6,17 @@ import type { Warn } from '../types'
 import { parse } from '@vue/compiler-sfc'
 import { transformSync } from 'oxc-transform'
 import { parseScript, walkNode } from '../babel'
-import { analyzeConditional, assertConditionalSupported, assertDirectivesPreserved, directiveRanges, overlapsDirective } from '../conditional'
+import {
+  analyzeConditional,
+  assertConditionalSupported,
+  assertDirectivesPreserved,
+  directiveRanges,
+  SCRIPT_DIRECTIVE_FORMS as SCRIPT_FORMS,
+  STYLE_DIRECTIVE_FORMS as STYLE_FORMS,
+  TEMPLATE_DIRECTIVE_FORMS as TEMPLATE_FORMS,
+} from '../conditional'
 import { rewriteTypeMacros } from '../macro'
-import { applyEdits, findTagStart } from '../shared'
+import { applyEdits, findTagStart, rangesOverlap } from '../shared'
 import { collectStyleEdits } from './less'
 import { downgradeScriptContent } from './script'
 
@@ -16,11 +24,6 @@ const TS_LANG_RE = /^(?:ts|tsx|typescript)$/
 const LANG_TS_ATTR_RE = /\s+lang=(["'])(?:ts|tsx|typescript)\1/i
 // 同 Vue parseFor 的规则：第一个顶层 `in` / `of` 是 v-for 的分隔符
 const FOR_SEPARATOR_RE = /\s+(?:in|of)\s+/
-
-/** script 块的指令写在 JS 注释里；模板用 HTML 注释；style 里只有块注释可靠 */
-const SCRIPT_FORMS: DirectiveForm[] = ['line', 'block']
-const STYLE_FORMS: DirectiveForm[] = ['block']
-const TEMPLATE_FORMS: DirectiveForm[] = ['html']
 
 /**
  * 校验 SFC 里每个块的条件编译写法都能安全透传。
@@ -169,7 +172,7 @@ function collectTemplateEdits(
       continue
     // 指令是注释，模板 AST 里看不到它们；万一某个表达式的区间真的跨到了指令行上，
     // 改动它就会破坏指令，这种情况直接跳过并提示，保持原样
-    if (overlapsDirective(directives, loc.start.offset, loc.end.offset)) {
+    if (rangesOverlap(directives, loc.start.offset, loc.end.offset)) {
       warn?.(`${filename} 的模板表达式跨越了条件编译指令，已跳过降级：${content}`)
       continue
     }
@@ -256,7 +259,3 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
   }
   return applyEdits(code, [...edits, ...templateEdits, ...styleEdits])
 }
-
-/** 供测试与外部使用：把一段 script 内容按当前 SFC 的规则降级 */
-export { downgradeScriptContent } from './script'
-export { SCRIPT_FORMS as SCRIPT_DIRECTIVE_FORMS, STYLE_FORMS as STYLE_DIRECTIVE_FORMS }

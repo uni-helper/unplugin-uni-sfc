@@ -5,9 +5,12 @@ defineProps<{
   title?: string
 }>()
 // #ifdef H5
+// @ts-expect-error 测试呢
 const description = ref<string>('这是一个H5页面的标题')
 // #endif
 // #ifdef MP-WEIXIN
+// @ts-expect-error 测试呢
+// eslint-disable-next-line ts/no-redeclare
 const description = ref<string>('')
 description.value = '这是一个微信小程序的标题'
 // #endif
@@ -16,7 +19,7 @@ description.value = '这是一个微信小程序的标题'
 <template>
   <div class="header">
     {{ title }}
-    {{ description.value }}
+    {{ description }}
   </div>
 </template>
 

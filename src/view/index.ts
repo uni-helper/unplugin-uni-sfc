@@ -1,10 +1,9 @@
 import type { SFCDescriptor } from '@vue/compiler-sfc'
-import type { ConditionalAnalysis, PlatformContext } from '../conditional'
 import type { ModuleReference } from '../reference'
 import type { Warn } from '../types'
 import { compileScript, compileTemplate, parse } from '@vue/compiler-sfc'
 import { parseScript } from '../babel'
-import { analyzeConditional, buildContexts, isRegionLive, project } from '../conditional'
+import { analyzeConditional, buildContexts, project, uniqueContexts } from '../conditional'
 import { collectReferences } from '../reference'
 
 /** 指令形式：模板用 HTML 注释，script 用 JS 注释，两种都要认 */
@@ -35,23 +34,6 @@ export interface ModuleView {
   code: string
   /** 源码里引用的模块，区间相对源码，供 generateBundle 回填引用（见 index.ts） */
   references: ModuleReference[]
-}
-
-/**
- * 按「活跃区域组合」给平台去重：判定结果相同的平台投影完全一样，编译一次就够。
- * 组合数通常是个位数，而不是平台数。
- */
-function uniqueContexts(analysis: ConditionalAnalysis, nvue: boolean): PlatformContext[] {
-  const seen = new Set<string>()
-  const unique: PlatformContext[] = []
-  for (const context of buildContexts(analysis, { nvue })) {
-    const signature = analysis.regions.map(region => (isRegionLive(region, context.values) ? '1' : '0')).join('')
-    if (seen.has(signature))
-      continue
-    seen.add(signature)
-    unique.push(context)
-  }
-  return unique
 }
 
 /** 取出一段 JS 里的 import 语句原文，按内容去重 */
@@ -161,7 +143,7 @@ export function toModuleView(code: string, filename: string, warn?: Warn): Modul
   try {
     // 没有条件编译时只有一种投影，走原来的单次编译
     // `.nvue` 的上下文多出 APP_NVUE / APP_PLUS_NVUE，视图的活跃组合要按它算
-    const contexts = uniqueContexts(analysis, filename.endsWith('.nvue'))
+    const contexts = uniqueContexts(analysis, buildContexts(analysis, { nvue: filename.endsWith('.nvue') }))
     if (contexts.length <= 1)
       return { code: compile(descriptor), references }
 

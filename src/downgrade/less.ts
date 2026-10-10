@@ -1,19 +1,18 @@
 import type { SFCStyleBlock } from '@vue/compiler-sfc'
-import type { DirectiveForm } from '../conditional'
 import type { Edit } from '../shared'
 import type { Warn } from '../types'
-import { analyzeConditional, assertDirectivesPreserved, buildContexts, project } from '../conditional'
+import {
+  analyzeConditional,
+  assertDirectivesPreserved,
+  buildContexts,
+  project,
+  STYLE_DIRECTIVE_FORMS as STYLE_FORMS,
+} from '../conditional'
 import { findTagStart } from '../shared'
 
 const LANG_LESS_RE = /^less$/
 // 与 script 块的 lang 改写同一套规则：只处理带引号的 lang 属性
 const LANG_LESS_ATTR_RE = /\s+lang=(["'])less\1/i
-
-/**
- * style 块里只有块注释可靠：less 编译会吃掉 `//` 注释，指令一旦写成行注释就会连带消失，
- * 产物里那一块样式会失去平台约束。因此这里只认 `/* ... *&#47;`。
- */
-const STYLE_FORMS: DirectiveForm[] = ['block']
 
 /** less 是可选依赖：只有 SFC 真的用到 lang="less" 时才会加载 */
 async function loadLess(): Promise<typeof import('less')> {

@@ -1,5 +1,5 @@
 import type { BabelNode } from '../babel'
-import type { ConditionalAnalysis, PlatformContext, Region } from '../conditional'
+import type { ConditionalAnalysis, Region } from '../conditional'
 import type { Edit } from '../shared'
 import type { Warn } from '../types'
 import { transformSync } from 'oxc-transform'
@@ -10,14 +10,12 @@ import {
   blankDirectives,
   buildContexts,
   directiveRanges,
-  isRegionLive,
   project,
+  SCRIPT_DIRECTIVE_FORMS as SCRIPT_FORMS,
+  uniqueContexts,
 } from '../conditional'
-import { applyEdits } from '../shared'
-import { collectErasureEdits, findGenerativeNode, hasTsSyntax, intersects, mergeEdits, parseTs } from './erase'
-
-/** script 块里合法的指令形式：JS 行注释与块注释。HTML 注释在 JS 里本来就非法 */
-const SCRIPT_FORMS = ['line', 'block'] as const
+import { applyEdits, rangesOverlap } from '../shared'
+import { collectErasureEdits, findGenerativeNode, hasTsSyntax, mergeEdits, parseTs } from './erase'
 
 export interface ScriptDowngradeOptions {
   filename: string
@@ -40,23 +38,6 @@ const OXC_OPTIONS = {
 
 function isBlank(text: string): boolean {
   return !text.trim()
-}
-
-/**
- * 按活跃区域的组合给上下文去重：判定结果相同的平台，投影文本完全一样，
- * 没必要每个平台各解析一遍。数量级通常是几个而不是十几个。
- */
-function uniqueContexts(analysis: ConditionalAnalysis, contexts: PlatformContext[]): PlatformContext[] {
-  const seen = new Set<string>()
-  const unique: PlatformContext[] = []
-  for (const context of contexts) {
-    const signature = analysis.regions.map(region => (isRegionLive(region, context.values) ? '1' : '0')).join('')
-    if (seen.has(signature))
-      continue
-    seen.add(signature)
-    unique.push(context)
-  }
-  return unique
 }
 
 /**
@@ -233,7 +214,7 @@ function eraseByProjection(
       if (edit.end > content.length)
         continue
       // 兜底：任何触碰指令行的改写都不可接受
-      if (intersects(directiveRangeList, edit.start, edit.end))
+      if (rangesOverlap(directiveRangeList, edit.start, edit.end))
         return null
       edits.push(edit)
     }
@@ -241,7 +222,7 @@ function eraseByProjection(
 
   // 已整体重写的区域：与之重叠的擦除区间作废
   const rewriteRanges = [...regenerated.values()].map(({ region }) => ({ start: region.start, end: region.end }))
-  const kept = mergeEdits(edits).filter(edit => !intersects(rewriteRanges, edit.start, edit.end))
+  const kept = mergeEdits(edits).filter(edit => !rangesOverlap(rewriteRanges, edit.start, edit.end))
 
   const all: Edit[] = [...kept]
   for (const { region, text } of regenerated.values())

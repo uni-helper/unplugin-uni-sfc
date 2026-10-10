@@ -1,4 +1,3 @@
-import type { Warn } from '../types'
 import process from 'node:process'
 
 /**
@@ -86,6 +85,15 @@ export type DirectiveForm = 'line' | 'block' | 'html'
 export type DirectiveKind = 'ifdef' | 'ifndef' | 'if' | 'elif' | 'else' | 'endif'
 
 const ALL_FORMS: DirectiveForm[] = ['line', 'block', 'html']
+
+/**
+ * 各块里合法的指令形式，是「指令能否安全透传」这一事实的唯一来源：
+ * script 块的指令写在 JS 注释里，模板用 HTML 注释，style 里只有块注释可靠
+ * （less 编译会吃掉 `//` 注释，行注释形式的指令会连带消失）。
+ */
+export const SCRIPT_DIRECTIVE_FORMS: DirectiveForm[] = ['line', 'block']
+export const STYLE_DIRECTIVE_FORMS: DirectiveForm[] = ['block']
+export const TEMPLATE_DIRECTIVE_FORMS: DirectiveForm[] = ['html']
 
 /**
  * 指令必须独占一行（允许前导缩进），与 uni-app 文档一致。
@@ -436,6 +444,23 @@ export function isRegionLive(region: Region, values: Record<string, unknown>): b
   })
 }
 
+/**
+ * 按活跃区域的组合给上下文去重：判定结果相同的平台，投影文本完全一样，
+ * 没必要每个平台各解析一遍。数量级通常是几个而不是十几个。
+ */
+export function uniqueContexts(analysis: ConditionalAnalysis, contexts: PlatformContext[]): PlatformContext[] {
+  const seen = new Set<string>()
+  const unique: PlatformContext[] = []
+  for (const context of contexts) {
+    const signature = analysis.regions.map(region => (isRegionLive(region, context.values) ? '1' : '0')).join('')
+    if (seen.has(signature))
+      continue
+    seen.add(signature)
+    unique.push(context)
+  }
+  return unique
+}
+
 function blank(text: string): string {
   return ' '.repeat(text.length)
 }
@@ -469,10 +494,6 @@ export function blankDirectives(code: string, analysis: ConditionalAnalysis): st
 /** 指令行的区间表，用来保证任何改写都不会碰到指令 */
 export function directiveRanges(analysis: ConditionalAnalysis): Array<{ start: number, end: number }> {
   return analysis.directives.map(directive => ({ start: directive.start, end: directive.end }))
-}
-
-export function overlapsDirective(ranges: Array<{ start: number, end: number }>, start: number, end: number): boolean {
-  return ranges.some(range => start < range.end && end > range.start)
 }
 
 /** 指令序列（种类 + 表达式），用于校验改写前后指令逐条不变 */
@@ -560,22 +581,4 @@ function describeForms(forms?: DirectiveForm[]): string {
     html: '<!-- #ifdef -->',
   }
   return list.map(form => names[form]).join(' / ')
-}
-
-/** 需要用到条件编译分析时统一从这里取，避免各处重复解析 */
-export function analyzeOnce(
-  code: string,
-  filename: string,
-  warn: Warn | undefined,
-  options: AnalyzeOptions & { label?: string } = {},
-): ConditionalAnalysis {
-  const analysis = analyzeConditional(code, options)
-  try {
-    assertConditionalSupported(analysis, filename, options)
-  }
-  catch (error) {
-    warn?.((error as Error).message)
-    throw error
-  }
-  return analysis
 }

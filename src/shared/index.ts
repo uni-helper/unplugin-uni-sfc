@@ -15,6 +15,11 @@ export interface Edit {
   text: string
 }
 
+/** 区间 [start, end) 是否与任意一个给定区间相交 */
+export function rangesOverlap(ranges: Array<{ start: number, end: number }>, start: number, end: number): boolean {
+  return ranges.some(range => start < range.end && end > range.start)
+}
+
 /** 按区间替换源码，区间之间不能重叠 */
 export function applyEdits(code: string, edits: Edit[]): string {
   let result = code

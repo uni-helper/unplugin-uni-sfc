@@ -388,7 +388,7 @@ function visitNode(collector: Collector, node: unknown): void {
     collectParamEdits(collector, record.params as BabelNode[])
 
   for (const [key, value] of Object.entries(record)) {
-    if (key === 'loc' || key === '__parent' || key === 'leadingComments' || key === 'trailingComments' || key === 'innerComments' || key === 'extra')
+    if (SKIP_KEYS.has(key))
       continue
     // 上面已经单独处理过的字段不再递归
     if ((MODIFIER_FIELDS as readonly string[]).includes(key))
@@ -443,9 +443,4 @@ export function mergeEdits(edits: Edit[]): Edit[] {
       merged.push({ ...edit })
   }
   return merged
-}
-
-/** 区间是否与给定区间相交 */
-export function intersects(ranges: Array<{ start: number, end: number }>, start: number, end: number): boolean {
-  return ranges.some(range => start < range.end && end > range.start)
 }
