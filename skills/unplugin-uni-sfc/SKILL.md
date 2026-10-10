@@ -1,6 +1,6 @@
 ---
 name: unplugin-uni-sfc
-description: 安装、配置和排障 @uni-helper/unplugin-uni-sfc——把 uni-app 的 TypeScript / Less SFC（.vue / .nvue）在构建阶段降级为 JavaScript / CSS 的构建插件。当用户提到 unplugin-uni-sfc、uni-sfc，想让 uni-app 组件库构建产物去掉 TS / less 依赖，配置 defineProps 类型宏回填，或遇到该插件的构建报错（条件编译、类型解析失败、less 缺失、非 ESM 产物警告）时使用本技能。
+description: 安装、配置和排障 @uni-helper/unplugin-uni-sfc——把 uni-app 的 TypeScript / Less SFC（.vue / .nvue）在构建阶段降级为 JavaScript / CSS 的构建插件，条件编译指令原样透传给下游。当用户提到 unplugin-uni-sfc、uni-sfc，想让 uni-app 组件库构建产物去掉 TS / less 依赖，配置 defineProps 类型宏回填，处理 #ifdef 条件编译，或遇到该插件的构建报错（条件编译写法不安全、类型解析失败、less 缺失、非 ESM 产物警告）时使用本技能。
 ---
 
 # unplugin-uni-sfc
@@ -8,6 +8,8 @@ description: 安装、配置和排障 @uni-helper/unplugin-uni-sfc——把 uni-
 把使用 TypeScript / Less 的 [uni-app](https://uniapp.dcloud.net.cn/) SFC（`.vue` / `.nvue`）在**构建阶段**降级为 JavaScript / CSS：`lang="ts"` 的 script 与模板表达式擦除为 JS，`lang="less"` 的 style 编译为 CSS，产物中的 `.vue` 以降级后的源码直接输出。典型场景是发布 uni-app 组件库时，让产物不再依赖 TypeScript / less 编译链。
 
 依赖解析、编译和产物组织仍交给打包工具（vite / rolldown / tsdown），插件本身**零配置**——`UnpluginUniSfc()` 不接收任何参数。
+
+条件编译（`#ifdef` / `#ifndef` / `#if` / `#else` / `#endif`）**不执行**，而是逐字节保留在产物里交给下游 uni-app。插件只负责保证：指令还在原位，且产物在每个平台的实际投影下都是正确的 JS / CSS。
 
 ## 1. 安装
 
@@ -65,9 +67,38 @@ export default defineConfig({
 写配置前先核对这几条，违反时插件会报错（或警告）而不是产出坏组件：
 
 1. **只支持 ESM 产物**：`format` 用 `es` / `esm`；`cjs` / `iife` / `umd` / `amd` 不支持。未设置时打包工具的默认值也是 ESM，一般不用管。
-2. **不支持条件编译**：SFC（script、模板、style）注释里出现 `#ifdef` / `#ifndef` / `#if` / `#elif` / `#endif` 时构建直接中断。改用运行时 `if` 判断，推荐 [`@uni-helper/uni-env`](https://github.com/uni-helper/uni-env)（`isH5`、`isMpWeixin`、`isApp` 等），或直接写 `if (process.env.UNI_PLATFORM === 'h5') { ... }`。
+2. **条件编译原样透传**：`#ifdef` / `#ifndef` / `#if` / `#else` / `#endif` 会被逐字节保留给下游 uni-app，插件不执行条件编译，只保证产物在每个平台下都是正确的 JS / CSS。指令必须写在注释里，且**独占一行**：script 用 `// #ifdef` 或 `/* #ifdef */`，模板用 `<!-- #ifdef -->`，style **只能**用 `/* #ifdef */`。
 3. **带 `src` 的外部块不处理**：`<script src>` / `<style src>` 既不会降级也不会进产物，改为内联。
 4. **失败即中断**：类型解析失败、less 编译失败、解析失败都会抛错终止构建，不会静默产出缺 props 声明的组件。这是有意设计，不要试图绕过。
+
+### 条件编译里会被拒绝的写法
+
+这些写法 uni-app 自己也会做错（静默丢代码或留下失效指令），插件选择中断构建。检查覆盖 **script / template / style 三个块**，没有 TS 的组件也会检查：
+
+| 写法 | 原因 |
+| --- | --- |
+| `#elif` | uni-app 的预处理不支持它，指令会残留在产物里 |
+| 平台名拼写错误（`#ifdef H5-WRONG`） | uni-app 按「假」处理，整块代码会凭空消失 |
+| 起始关键字大小写写错（`#IfDeF` / `#IFDEF`） | uni-app 只认小写，写错会让它内部抛错并回退成原文，整段代码在所有平台生效 |
+| 缺 `#endif` / 多余的 `#endif` | uni-app 的预处理直接失败 |
+| `#ifdef` 落在语句内部（对象字面量、数组、参数列表中间）且该处有 TS | 切开的片段不是合法语法，无法安全擦除 TS |
+| style 里用 `// #ifdef` | less 会吃掉行注释，指令传不到产物 |
+| 指令写在 less 的嵌套规则内部 | less 会把规则提到指令外面，样式会在所有平台生效 |
+
+结束关键字的大小写**不受限制**：`#ENDIF` / `#EndIf` / `#Else` 都正常。
+
+合法的写法（**允许**，不要误报为错误）：互斥分支里各自声明同名变量——每个平台的投影里只会剩一处，是合法代码。
+
+```vue
+<script setup lang="ts">
+// #ifdef H5
+const platform: string = 'h5'
+// #endif
+// #ifndef H5
+const platform: string = 'mp'
+// #endif
+</script>
+```
 
 ## 4. 排错速查
 
@@ -77,7 +108,9 @@ export default defineConfig({
 | --- | --- | --- |
 | `SFC 使用了 <style lang="less">，但未安装 less` | SFC 有 `lang="less"` 但项目没装 less | `pnpm add -D less` |
 | `<style lang="less"> 编译失败` | less 源码有语法错误 | 按报错位置修 less 源码 |
-| `使用了 uni-app 条件编译（#ifdef …），本插件不支持条件编译` | SFC 注释里有条件编译指令 | 删掉指令，改用 `if` 分支（见第 3 节） |
+| `使用了本插件无法安全处理的条件编译` + 逐条列出问题 | 用了上一节表格里的写法 | 按列表逐条修正；`#elif` 改用嵌套 `#ifdef` 或 `\|\|` 表达式 |
+| `条件编译指令在 <平台> 下守不住对应的样式` | 指令写在 less 嵌套规则内部，规则被提到指令外面 | 把指令移到顶层规则之间 |
+| `less 编译会吃掉行注释（//）` | style 里用了 `// #ifdef` | 改成 `/* #ifdef ... */` |
 | `解析失败，无法降级为 JS` | script / 模板里有 TS 擦不掉或语法非法的内容 | 按报错位置修正源码 |
 | 类型宏解析失败（跨文件类型、tsconfig paths 解析不出来） | `defineProps<T>()` 的类型无法静态解析 | 修正类型引用；或改用运行时声明 `defineProps({ ... })` / `defineEmits([...])` |
 | `产物格式 … 不受支持：本插件产出的 .vue 是 ESM 源码，只支持 ESM 产物` | `format` 设成了 cjs / iife / umd 等 | 改为 `es` / `esm` |
@@ -91,5 +124,6 @@ export default defineConfig({
 构建完成后检查：
 
 - `dist` 中出现 `.vue` 文件，内容是降级后的源码：无 `lang="ts"`、无 TS 类型标注、无 `lang="less"`；
-- 产物 JS 里对组件的引用指向 `.vue` 文件；
-- 使用类型宏的组件，`defineProps` 调用处已回填运行时声明（props 对象 / emits 数组）。
+- 产物 JS 里对组件的引用指向 `.vue` 文件，且每条 import 都能在 `dist` 里找到对应文件（不会悬空）；
+- 使用类型宏的组件，`defineProps` 调用处已回填运行时声明（props 对象 / emits 数组）；
+- 用了条件编译的组件，产物里的 `#ifdef` / `#endif` 条数与源码一致，且每个平台独占的模块都出现在 `dist` 中。

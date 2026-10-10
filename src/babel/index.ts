@@ -33,9 +33,19 @@ export function isBabelNode(value: unknown): value is BabelNode {
   return !!value && typeof value === 'object' && typeof (value as BabelNode).type === 'string'
 }
 
-export function parseScript(content: string, tsx: boolean): BabelNode {
+/**
+ * 解析脚本内容。
+ *
+ * `tolerant` 打开 babel 的错误恢复：保留条件编译指令的源码里，
+ * 互斥分支的同名声明（`#ifdef H5` 与 `#ifndef H5` 各写一次 `const platform`）在合并文本中
+ * 属于重复声明，但在每个平台的实际投影里只会剩一处，是合法的。
+ * 打开恢复后仍能拿到完整 AST，且各节点区间准确；调用方再用「等长投影」逐平台校验。
+ * 注意恢复模式下语法错误只记录在 `ast.errors` 里，需要调用方自行判断。
+ */
+export function parseScript(content: string, tsx: boolean, tolerant = false): BabelNode {
   return babelParse(content, {
     sourceType: 'module',
+    errorRecovery: tolerant,
     plugins: tsx ? ['typescript', 'jsx'] : ['typescript'],
   }) as unknown as BabelNode
 }

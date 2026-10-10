@@ -382,11 +382,11 @@ describe('unplugin-uni-sfc', () => {
     // 生成的声明里必须引用那个导入进来的 helper（而不是 Vue 自己的占位名）
     const helper = /import \{ mergeDefaults as (\w+) \}/.exec(app)?.[1]
     expect(helper).toBeTruthy()
-    expect(app).toContain(`defineProps(/*@__PURE__*/ ${helper}(`)
+    expect(app).toMatch(new RegExp(`defineProps\\(/\\*@__PURE__\\*/\\s*${helper}\\(`))
     // withDefaults 外层必须消失：Vue 不允许它搭配运行时声明
     expect(app).not.toContain('withDefaults')
-    // 默认值原文保留
-    expect(app).toContain('...{ label: "default" }')
+    // 默认值原文保留（擦除只删类型，不改引号与空格）
+    expect(app).toMatch(/\.\.\.\{ label: ['"]default['"] \}/)
     expect(app).toMatch(/list:\s*\(\)\s*=>\s*\[\]/)
   })
 
@@ -401,8 +401,10 @@ describe('unplugin-uni-sfc', () => {
   it('只有类型导入的 <script setup> 不会残留 export {}', async () => {
     const app = contentOf(await buildFixture('macros'), 'TypeImportOnly.vue')
 
-    // oxc 擦除类型导入后会补 `export {}`，而 <script setup> 不允许 ES 模块导出
-    expect(app).not.toMatch(/export\s*\{\s*\}/)
+    // 类型导入被擦掉后可能只剩一个空模块，此时不能补 `export {}`
+    // （`<script setup>` 不允许 ES 模块导出）。断言真实的导出语句，而不是文本里
+    // 恰好出现的 `export {}`——fixture 的注释里就写了这四个字符。
+    expect(app).not.toMatch(/(?:^|\n)[ \t]*export[ \t]*\{[ \t]*\}/)
     expect(app).toContain('<script setup>')
     // 类型导入被擦掉，但宏回填的声明还在
     expect(app).not.toContain('import type')
@@ -413,7 +415,7 @@ describe('unplugin-uni-sfc', () => {
     const app = contentOf(await buildFixture('macros'), 'RuntimeDecl.vue')
 
     expect(app).toMatch(/defineProps\(\{\s*label:\s*\{\s*type:\s*String/)
-    expect(app).toMatch(/defineEmits\(\["tap"\]\)/)
+    expect(app).toMatch(/defineEmits\(\[['"]tap['"]\]\)/)
     // 运行时声明本来就不需要回填，不应被改写
     expect(app).not.toMatch(/mergeDefaults/)
   })
@@ -439,15 +441,74 @@ describe('unplugin-uni-sfc', () => {
     expect(message).not.toContain('defineProps()')
   })
 
-  it('使用了条件编译的 SFC 会中断构建，并提示改用 if 分支判断', async () => {
-    const error = await buildFixture('conditional').catch((error: Error) => error)
+  it('条件编译：指令原样保留在产物里，TS 同时被擦除', async () => {
+    const files = await buildFixture('conditional')
+    const app = contentOf(files, 'App.vue')
 
-    expect(error).toBeInstanceOf(Error)
-    const message = (error as Error).message
-    expect(message).toContain('不支持条件编译')
-    // 报错定位到第一处指令：script 里的 `// #ifdef H5`
-    expect(message).toMatch(/第 4 行.*#ifdef H5/s)
-    expect(message).toContain('if 分支判断')
+    // 指令逐条保留：script、模板、style 三处都在
+    expect(app).toContain('// #ifdef H5')
+    expect(app).toContain('// #ifndef H5')
+    expect(app).toContain('// #ifdef APP-PLUS')
+    expect(app).toContain('<!-- #ifdef H5 -->')
+    expect(app).toContain('<!-- #ifdef MP-WEIXIN -->')
+    expect(app).toContain('/* #ifndef H5 */')
+    expect(app).toContain('/* #ifdef H5 */')
+    // TS 被擦掉，指令留在原位（含对象字面量内部那两条）
+    expect(app).not.toContain('lang="ts"')
+    expect(app).not.toContain('Record<string, unknown>')
+    expect(app).not.toContain(' as boolean')
+    expect(app).toMatch(/deep: true,/)
+    expect(app).toContain('// #ifdef APP-PLUS')
+    expect(app).toContain('plus: 1,')
+    // 互斥分支的同名声明各自保留，值都是擦除后的 JS
+    expect(app).toMatch(/const platform = ['"]h5['"]/)
+    expect(app).toMatch(/const platform = ['"]mp['"]/)
+  })
+
+  it('条件编译：产物里每条引用都指向真实存在的文件', async () => {
+    const files = await buildFixture('conditional')
+    const names = fileNames(files)
+
+    // 两个平台各自的模块都要产出：产物里 .vue 的引用必须有落点
+    expect(names).toContain('wx-only.js')
+    expect(names).toContain('h5-only.js')
+
+    // 逐个产物检查：任何相对引用都必须能在产物里找到。
+    // 打包工具会把单引用者的叶子模块内联进 .vue 的 chunk，而那个 chunk 随后被换成
+    // .vue 资产 —— 不特殊处理的话引用就会悬空（这正是本测试要挡住的回归）。
+    for (const file of files) {
+      const code = file.type === 'asset' ? String(file.source) : (file as OutputChunk).code
+      const dir = path.posix.dirname(file.fileName)
+      for (const match of code.matchAll(/(?:from\s+|import\s*\(\s*|import\s+)["']([^"']+)["']/g)) {
+        const specifier = match[1]
+        if (!specifier.startsWith('.'))
+          continue
+        const target = path.posix.normalize(path.posix.join(dir, specifier))
+        expect(names, `${file.fileName} 的 ${specifier} 指向不存在的产物`).toContain(target)
+      }
+    }
+  })
+
+  it('条件编译：纯 JS 组件（没有 lang="ts"）的指令也原样保留', async () => {
+    const files = await buildFixture('conditional')
+    const plain = contentOf(files, 'Plain.vue')
+
+    // 这类组件没有 TS 要降级，最容易在「提前返回」时漏掉校验与透传
+    expect(plain).toContain('<!-- #ifdef H5 -->')
+    expect(plain).toContain('<!-- #ifndef H5 -->')
+    expect(plain).toContain('<!-- #endif -->')
+    // 断言真实属性，而不是文本里恰好出现的字样（fixture 的注释里就写了 lang="ts"）
+    expect(plain).not.toMatch(/<script[^>]*\slang=/)
+    expect(plain).toContain('export default')
+  })
+
+  it('条件编译：只有 template 的 SFC 也能产出', async () => {
+    const files = await buildFixture('conditional')
+    const only = contentOf(files, 'TemplateOnly.vue')
+
+    expect(only).toContain('<!-- #ifdef MP-WEIXIN -->')
+    expect(only).toContain('<!-- #ifdef H5 -->')
+    expect(only).toContain('<!-- #endif -->')
   })
 
   it('.vue 的产物路径完全由打包工具决定，而不是插件或入口目录', async () => {

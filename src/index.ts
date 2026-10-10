@@ -162,7 +162,10 @@ export const unpluginFactory: UnpluginFactory<Options | undefined, false> = () =
     return `${stem}${path.extname(id)}`
   }
 
-  /** 读取 .vue 并降级 TS；资产统一在生成阶段产出，因为位置要到那时才能确定 */
+  /**
+   * 读取 .vue 并降级 TS；资产统一在生成阶段产出，因为位置要到那时才能确定。
+   * 返回值里带上视图补全依赖图用的「强制引用」，供 resolveId 标记为不可摇树。
+   */
   async function loadSfc(id: string, warn: Warn): Promise<SfcOutput | undefined> {
     const existing = outputs.get(id)
     if (existing)
@@ -206,8 +209,14 @@ export const unpluginFactory: UnpluginFactory<Options | undefined, false> = () =
       if (!record)
         resolvedImports.set(sfcId, record = new Map())
       record.set(source, resolved && !resolved.external ? toId(resolved.id) : null)
-      // 直接复用打包工具解析出来的结果，避免同一个引用被解析两次
-      return resolved ?? undefined
+
+      // .vue 的 chunk 随后会被换成 .vue 资产，被内联进它的模块会一起消失，
+      // 而产物里的 .vue 仍然 import 着那些模块 —— 引用就悬空了。
+      // no-treeshake 让每个被引用的模块单独成 chunk（配套的副作用 import 见 view/index.ts），
+      // 引用才有落点。external 的依赖（vue 等）不在此列。
+      return resolved && !resolved.external
+        ? { ...resolved, moduleSideEffects: 'no-treeshake' as const }
+        : (resolved ?? undefined)
     },
     async load(this: BundlerContext, id: string) {
       const fileId = toId(id)

@@ -1,23 +1,58 @@
-import type { SFCBlock, SFCScriptBlock, SFCTemplateBlock } from '@vue/compiler-sfc'
+import type { SFCBlock, SFCDescriptor, SFCScriptBlock, SFCTemplateBlock } from '@vue/compiler-sfc'
 import type { BabelNode } from '../babel'
+import type { DirectiveForm } from '../conditional'
+import type { Edit } from '../shared'
 import type { Warn } from '../types'
 import { parse } from '@vue/compiler-sfc'
 import { transformSync } from 'oxc-transform'
 import { parseScript, walkNode } from '../babel'
+import { analyzeConditional, assertConditionalSupported, assertDirectivesPreserved, directiveRanges, overlapsDirective } from '../conditional'
 import { rewriteTypeMacros } from '../macro'
 import { applyEdits, findTagStart } from '../shared'
 import { collectStyleEdits } from './less'
+import { downgradeScriptContent } from './script'
 
 const TS_LANG_RE = /^(?:ts|tsx|typescript)$/
 const LANG_TS_ATTR_RE = /\s+lang=(["'])(?:ts|tsx|typescript)\1/i
 // 同 Vue parseFor 的规则：第一个顶层 `in` / `of` 是 v-for 的分隔符
 const FOR_SEPARATOR_RE = /\s+(?:in|of)\s+/
 
-// 条件编译指令：#ifdef / #ifndef / #if / #elif / #else / #endif
-const CONDITIONAL_DIRECTIVE_RE = /#\s*(?:ifdef|ifndef|if|elif|else|endif)\b[^\n]*/
-// 指令必须写在注释里才会生效：JS/TS 的行注释与块注释、CSS 的块注释、模板的 HTML 注释；
-// 只扫注释内的指令，模板纯文本、CSS 选择器等处的 `#ifdef` 字样不是条件编译
-const COMMENT_RE = /\/\/[^\n]*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g
+/** script 块的指令写在 JS 注释里；模板用 HTML 注释；style 里只有块注释可靠 */
+const SCRIPT_FORMS: DirectiveForm[] = ['line', 'block']
+const STYLE_FORMS: DirectiveForm[] = ['block']
+const TEMPLATE_FORMS: DirectiveForm[] = ['html']
+
+/**
+ * 校验 SFC 里每个块的条件编译写法都能安全透传。
+ *
+ * 必须逐块检查、且在任何降级动作之前：
+ * - uni-app 的 html / css 规则同样不支持 `#elif`，未知平台名同样会静默丢掉整块内容，
+ *   所以模板与样式里的这些写法与 script 里一样有害；
+ * - 没有 TS 需要降级时（`downgradeSFC` 会提前返回）也必须检查，
+ *   否则纯 JS 的组件会把坏指令原样发进产物。
+ */
+function assertAllBlocksSupported(descriptor: SFCDescriptor, filename: string): void {
+  const blocks: Array<{ forms: DirectiveForm[], content: string | undefined, label: string }> = [
+    { forms: SCRIPT_FORMS, content: descriptor.script?.content, label: '<script>' },
+    { forms: SCRIPT_FORMS, content: descriptor.scriptSetup?.content, label: '<script setup>' },
+    { forms: TEMPLATE_FORMS, content: descriptor.template?.content, label: '<template>' },
+    ...descriptor.styles.map((style, index) => ({
+      forms: STYLE_FORMS,
+      content: style.content,
+      label: descriptor.styles.length > 1 ? `<style #${index + 1}>` : '<style>',
+    })),
+  ]
+
+  for (const block of blocks) {
+    if (block.content === undefined)
+      continue
+    assertConditionalSupported(
+      analyzeConditional(block.content, { forms: block.forms }),
+      filename,
+      { forms: block.forms, label: block.label },
+    )
+  }
+}
 
 function isTsBlock(block?: SFCBlock | null): boolean {
   return !!block?.lang && TS_LANG_RE.test(block.lang)
@@ -25,85 +60,6 @@ function isTsBlock(block?: SFCBlock | null): boolean {
 
 function isTsxBlock(block: SFCBlock): boolean {
   return block.lang === 'tsx'
-}
-
-/** 找出第一处条件编译，返回指令原文（如 `#ifdef H5`）和它所在的行号 */
-function findConditionalCompilation(code: string): { directive: string, line: number } | undefined {
-  for (const comment of code.matchAll(COMMENT_RE)) {
-    const directive = CONDITIONAL_DIRECTIVE_RE.exec(comment[0])?.[0].trim()
-    if (!directive)
-      continue
-    const offset = (comment.index ?? 0) + comment[0].indexOf(directive)
-    return { directive, line: code.slice(0, offset).split('\n').length }
-  }
-}
-
-/**
- * 空的 `export {}` 语句（没有导出声明、没有 specifier、没有来源）。
- *
- * oxc 在删掉脚本里全部类型导入后会补一个，用来维持「这是模块」的语义，
- * 但 `<script setup>` 不允许出现 ES 模块导出（Vue 会直接报错），必须去掉。
- */
-function hasEmptyExport(ast: BabelNode): boolean {
-  const body = ast.program?.body ?? ast.body ?? []
-  return body.some(node =>
-    node.type === 'ExportNamedDeclaration'
-    && !node.declaration
-    && !node.source
-    && !node.specifiers?.length)
-}
-
-/**
- * 去掉 oxc 自行补上的 `export {}`：只在原内容里没有空导出时才处理，
- * 用户自己写的 `export {}` 原样保留。
- */
-function stripInjectedEmptyExport(code: string, source: string, tsx: boolean): string {
-  if (!/(?:^|\n)\s*export\s*\{\s*\}\s*;?/.test(code))
-    return code
-  let sourceAst: BabelNode
-  try {
-    sourceAst = parseScript(source, tsx)
-  }
-  catch {
-    return code
-  }
-  if (hasEmptyExport(sourceAst))
-    return code
-
-  let outputAst: BabelNode
-  try {
-    outputAst = parseScript(code, tsx)
-  }
-  catch {
-    return code
-  }
-  const injected = (outputAst.program?.body ?? []).find(node =>
-    node.type === 'ExportNamedDeclaration'
-    && !node.declaration
-    && !node.source
-    && !node.specifiers?.length)
-  if (!injected)
-    return code
-  // 连同它前面的空白一起删掉，避免留下空行
-  const start = code.slice(0, injected.start).replace(/[ \t]*$/, '').replace(/\n$/, '').length
-  return code.slice(0, start) + code.slice(injected.end)
-}
-
-function transformTs(content: string, filename: string, lang: 'ts' | 'tsx'): string {
-  const { code, errors } = transformSync(filename, content, {
-    lang,
-    typescript: {
-      // script 里的导入可能只在模板中使用（oxc 看不到模板），默认会当成未使用而删除，
-      // 这里只删除显式的 `import type`，其余值导入全部保留（同 verbatimModuleSyntax 语义）
-      onlyRemoveTypeImports: true,
-      // 支持 TS namespace 的转换
-      allowNamespaces: true,
-    },
-  })
-  const fatal = errors.filter(error => (error.severity as string) === 'Error')
-  if (fatal.length)
-    throw new Error(fatal.map(error => error.codeframe ?? error.message).join('\n'))
-  return stripInjectedEmptyExport(code, content, lang === 'tsx')
 }
 
 /** 模板中可降级的表达式（插值与指令值），loc 是整个源文件的绝对偏移 */
@@ -172,7 +128,7 @@ function stripExpressionTypes(content: string, filename: string): string | null 
     return `${strippedAlias ?? alias}${separator[0]}${strippedSource ?? source}`
   }
 
-  // 仅当真的存在 TS 语法节点时才改写，避免 oxc 对纯 JS 表达式的格式调整（如箭头函数参数补括号）
+  // 仅当真的存在 TS 语法节点时才改写，避免对纯 JS 表达式做多余的格式调整
   let hasTs = false
   walkNode(ast, (node) => {
     if (node.type.startsWith('TS'))
@@ -194,25 +150,45 @@ function stripExpressionTypes(content: string, filename: string): string | null 
 }
 
 /** 收集模板中需要降级的表达式，返回对整个源码的替换区间 */
-function collectTemplateEdits(template: SFCTemplateBlock, filename: string): Array<{ start: number, end: number, text: string }> {
+function collectTemplateEdits(
+  template: SFCTemplateBlock,
+  code: string,
+  filename: string,
+  warn?: Warn,
+): Edit[] {
   const expressions: TemplateExpression[] = []
   collectTemplateExpressions(template.ast, expressions)
-  const edits = new Map<number, { start: number, end: number, text: string }>()
+  if (!expressions.length)
+    return []
+
+  const directives = directiveRanges(analyzeConditional(code, { forms: ['html'] }))
+  const edits = new Map<number, Edit>()
   for (const { content, loc } of expressions) {
     const text = stripExpressionTypes(content, filename)
-    if (text != null)
-      edits.set(loc.start.offset, { start: loc.start.offset, end: loc.end.offset, text })
+    if (text == null)
+      continue
+    // 指令是注释，模板 AST 里看不到它们；万一某个表达式的区间真的跨到了指令行上，
+    // 改动它就会破坏指令，这种情况直接跳过并提示，保持原样
+    if (overlapsDirective(directives, loc.start.offset, loc.end.offset)) {
+      warn?.(`${filename} 的模板表达式跨越了条件编译指令，已跳过降级：${content}`)
+      continue
+    }
+    edits.set(loc.start.offset, { start: loc.start.offset, end: loc.end.offset, text })
   }
   return [...edits.values()]
 }
 
 /**
  * 把 SFC 中 script 块的 TS 降级为 JS、style 块的 less 编译为 CSS，返回新的 .vue 源码。
+ *
+ * **条件编译指令原样保留**：指令对平台的含义由下游 uni-app 决定，插件只保证
+ * 「产物在每一个平台的投影下都是正确的 JS / CSS」。做法是先用等长投影定位该擦除的 TS，
+ * 再回到原源码上做纯删除——指令从不参与解析与打印，因此不会被改写或丢失。
+ *
  * script 块使用了 TS 时，模板表达式（插值、指令值）里的 TS 语法一并降级，
  * 保证产物 SFC 中不残留任何 TS。
  * 只改写这些位置自身，不做任何 vue 编译。没有需要降级的内容时返回 null；
  * SFC 解析失败时抛错中断构建（同 plugin-vue 的行为），避免 TS 原文被静默发进产物。
- * SFC 里出现 uni-app 条件编译时同样抛错中断：本插件不支持条件编译。
  */
 export async function downgradeSFC(code: string, filename: string, warn?: Warn): Promise<string | null> {
   const { descriptor, errors } = parse(code, { filename })
@@ -226,34 +202,34 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
     throw new Error(`${filename} 解析失败，无法降级为 JS：\n${detail}`)
   }
 
-  // 整个 SFC（script / 模板 / style）都检查，且在 TS 降级之前：任何 .vue 里出现条件编译都直接中断构建
-  const conditional = findConditionalCompilation(code)
-  if (conditional) {
-    throw new Error(
-      `${filename} 第 ${conditional.line} 行使用了 uni-app 条件编译（${conditional.directive}），本插件不支持条件编译，指令会原样保留在产物中。请改用 if 分支判断（如 if (process.env.UNI_PLATFORM === 'h5') { ... }）替代。`,
-    )
-  }
+  // 先逐块校验条件编译写法：合法的指令才能原样透传，不合法的必须在这里就拦下，
+  // 不能等到「有 TS 要降级」时才检查（没有 TS 的组件同样会把坏指令发进产物）
+  assertAllBlocksSupported(descriptor, filename)
 
   const blocks = [descriptor.script, descriptor.scriptSetup]
     .filter((block): block is SFCScriptBlock => !!block && !block.src && isTsBlock(block))
   // 模板表达式随 script 一起降级（Vue 仅在 script 为 ts 时才允许模板里写 TS）
   const templateEdits = blocks.length && descriptor.template?.ast && !descriptor.template.src
-    ? collectTemplateEdits(descriptor.template, filename)
+    ? collectTemplateEdits(descriptor.template, code, filename, warn)
     : []
   // style 块的 less 降级与 script 无关：纯 JS 的 SFC 也可能用到 less
   const styleEdits = await collectStyleEdits(descriptor.styles, code, filename, warn)
   if (!blocks.length && !templateEdits.length && !styleEdits.length)
     return null
 
-  const edits: Array<{ start: number, end: number, text: string }> = []
+  const edits: Edit[] = []
   for (const block of blocks) {
     const tsx = isTsxBlock(block)
     let content = block.content
 
     // 类型宏的运行时声明只存在于类型里，必须在擦除类型之前回填；
     // 普通 <script> 的类型声明也参与解析（两个块共享作用域）
-    if (block === descriptor.scriptSetup)
+    if (block === descriptor.scriptSetup) {
       content = rewriteTypeMacros(block, descriptor.script, tsx, filename)
+      // 宏改写会替换调用处，若某次替换跨到了指令行上就会破坏指令，这里立刻发现
+      // （指令写法本身已在 assertAllBlocksSupported 里校验过）
+      assertDirectivesPreserved(block.content, content, filename, { forms: SCRIPT_FORMS })
+    }
 
     const tagStart = findTagStart(code, 'script', block)
     edits.push({
@@ -261,10 +237,26 @@ export async function downgradeSFC(code: string, filename: string, warn?: Warn):
       end: block.loc.start.offset,
       text: code.slice(tagStart, block.loc.start.offset).replace(LANG_TS_ATTR_RE, ''),
     })
-    const jsCode = transformTs(content, filename, tsx ? 'tsx' : 'ts')
-    // oxc 会修剪块内容开头的前导空白，按原文补回，避免 `<script setup>` 后直接贴上首行代码
+    const jsCode = downgradeScriptContent(content, {
+      filename,
+      tsx,
+      label: block === descriptor.scriptSetup ? '<script setup>' : '<script>',
+      // `.nvue` 的上下文多出 APP_NVUE / APP_PLUS_NVUE，`#ifdef APP-NVUE` 要靠它才能判对
+      nvue: filename.endsWith('.nvue'),
+      warn,
+    })
+    // 擦除走的是「只删区间」，缩进天然保留；仅在块内首行被整体删除时补回换行
     const leading = /^\s*/.exec(content)?.[0] ?? ''
-    edits.push({ start: block.loc.start.offset, end: block.loc.end.offset, text: leading + jsCode })
+    const needsLeading = leading.includes('\n') && !jsCode.startsWith(leading)
+    edits.push({
+      start: block.loc.start.offset,
+      end: block.loc.end.offset,
+      text: needsLeading ? leading + jsCode.replace(/^\s*/, '') : jsCode,
+    })
   }
   return applyEdits(code, [...edits, ...templateEdits, ...styleEdits])
 }
+
+/** 供测试与外部使用：把一段 script 内容按当前 SFC 的规则降级 */
+export { downgradeScriptContent } from './script'
+export { SCRIPT_FORMS as SCRIPT_DIRECTIVE_FORMS, STYLE_FORMS as STYLE_DIRECTIVE_FORMS }
